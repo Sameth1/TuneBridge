@@ -1,5 +1,5 @@
 import { fetchJson, fetchText, extractJsonAfter, findAllDeep } from './http.js';
-import { cleanChannelName, splitArtistTitle, artistsOverlap, youtubeUrl } from './lib.js';
+import { cleanChannelName, splitArtistTitle, artistsOverlap, compactName, youtubeUrl } from './lib.js';
 
 // Consent cookies keep EU visitors from being redirected to consent.youtube.com.
 const PAGE_HEADERS = { 'Accept-Language': 'en-US,en;q=0.9', Cookie: 'SOCS=CAI; CONSENT=YES+1' };
@@ -7,9 +7,18 @@ const MUSIC_CLIENT = { clientName: 'WEB_REMIX', clientVersion: '1.20250101.01.00
 const WEB_CLIENT = { clientName: 'WEB', clientVersion: '2.20250101.00.00', hl: 'en' };
 const VIDEO_LABEL = /\s*[([](?:official\s+)?(?:(?:music|lyric)\s+)?(?:video|audio|visuali[sz]er|clip)(?:\s+(?:oficial|officiel|resmi))?[)\]]|\s*[([](?:lyrics?|official|hd|hq|4k|m\/?v|klip|video\s*klip)[)\]]/gi;
 
-// "Blinding Lights (Official Audio)" → "Blinding Lights"; version labels such as "(Live)" stay.
+const TRAILING_LABEL = /(?:\s+[-|–]\s*|\s+)(?:official\s+)?(?:(?:music\s+)?video(?:\s*klip)?|klip|audio|lyrics?|visuali[sz]er|hd|4k)$/i;
+
+// "Blinding Lights (Official Audio)" → "Blinding Lights", "Gülpembe HD Klip" → "Gülpembe";
+// version labels such as "(Live)" stay.
 export function cleanVideoTitle(title) {
-  return String(title || '').replace(VIDEO_LABEL, '').trim();
+  let cleaned = String(title || '').replace(VIDEO_LABEL, '').trim();
+  for (let previous = ''; previous !== cleaned;) {
+    previous = cleaned;
+    const next = cleaned.replace(TRAILING_LABEL, '').trim();
+    if (next) cleaned = next;
+  }
+  return cleaned;
 }
 // ytmusicapi's "songs" filter: only official audio tracks, not videos or user uploads.
 const SONGS_FILTER = 'EgWKAQIIAWoMEA4QChADEAQQCRAF';
@@ -118,22 +127,39 @@ export async function searchYoutubeMusic(query, country = 'us') {
   return parseMusicSearch(response);
 }
 
-// Regular YouTube search, limited to uploads that can be trusted as the artist's own:
-// auto-generated "Topic" channels (the YouTube Music song itself) and verified artist channels.
+// Regular YouTube search, limited to uploads that can be trusted as official:
+// auto-generated "Topic" channels (the YouTube Music song itself), verified artist channels,
+// and verified label channels ("netd müzik").
 export function parseVideoSearch(response) {
   return findAllDeep(response, 'videoRenderer').map(video => {
     const channel = (video.ownerText?.runs || []).map(run => run.text).join('');
+    const badges = (video.ownerBadges || []).map(badge => badge.metadataBadgeRenderer?.style);
     const topic = /\s-\sTopic$/i.test(channel);
-    const verified = (video.ownerBadges || []).some(badge => badge.metadataBadgeRenderer?.style === 'BADGE_STYLE_TYPE_VERIFIED_ARTIST');
-    if (!/^[\w-]{11}$/.test(video.videoId || '') || !(topic || verified)) return null;
-    const artist = cleanChannelName(channel);
-    const rawTitle = (video.title?.runs || []).map(run => run.text).join('');
+    const artistChannel = badges.includes('BADGE_STYLE_TYPE_VERIFIED_ARTIST');
+    if (!/^[\w-]{11}$/.test(video.videoId || '') || !(topic || artistChannel || badges.includes('BADGE_STYLE_TYPE_VERIFIED'))) return null;
+    const channelName = cleanChannelName(channel);
+    // Bilingual titles add " | <other script>"; only the first part names the song.
+    const rawTitle = (video.title?.runs || []).map(run => run.text).join('').split(/\s+\|{1,2}\s+/)[0];
     const split = splitArtistTitle(rawTitle);
+    const titleArtist = compactName(String(split?.artist || '').split(',')[0]);
+    // An artist channel counts as the artist's own only if its name agrees with the artist in the title;
+    // otherwise it is another artist's upload (possibly a cover) and is held to the label rules.
+    const ownChannel = artistChannel && (!split || artistsOverlap(channelName, split.artist) || (titleArtist.length >= 3 && compactName(channelName).includes(titleArtist)));
+    const label = !topic && !ownChannel && (artistChannel || badges.includes('BADGE_STYLE_TYPE_VERIFIED'));
+    // A Topic upload's title is the song. Artist and label channels title uploads "Artist - Title";
+    // an artist channel's name may differ from the artist ("barismancotv"), so the title names the artist.
+    let artist = channelName;
+    let title = rawTitle;
+    if (split && (!topic || artistsOverlap(channelName, split.artist))) ({ artist, title } = topic ? { artist, title: split.title } : split);
+    title = cleanVideoTitle(title);
+    // Label channels also upload live and TV performances: only plain "Artist - Title" uploads count.
+    if (label && (!split || /[([]/.test(title))) return null;
     return {
-      title: cleanVideoTitle(split && artistsOverlap(artist, split.artist) ? split.title : rawTitle),
+      title,
       artist,
       duration: parseDuration(video.lengthText?.simpleText),
       isrc: null,
+      official: topic ? 'topic' : ownChannel ? 'artist' : 'label',
       topic,
       videoId: video.videoId,
       url: youtubeUrl('youtube', video.videoId)
@@ -148,4 +174,28 @@ export async function searchYoutubeVideos(query, country = 'us') {
     body: JSON.stringify({ context: { client: { ...WEB_CLIENT, gl: country.toUpperCase() } }, query })
   });
   return parseVideoSearch(response);
+}
+
+// YouTube Music's "next" response for a song names its album (a MPREb_ browse id), which is the album's page.
+export function albumOfSong(response) {
+  const run = findAllDeep(response, 'runs').flat().find(item => item?.navigationEndpoint?.browseEndpoint?.browseId?.startsWith('MPREb_'));
+  return run ? { title: run.text, url: `https://music.youtube.com/browse/${run.navigationEndpoint.browseEndpoint.browseId}` } : null;
+}
+
+export async function youtubeMusicAlbumOfVideo(videoId) {
+  const response = await fetchJson('https://music.youtube.com/youtubei/v1/next?prettyPrint=false', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: 'https://music.youtube.com', Referer: 'https://music.youtube.com/', ...PAGE_HEADERS },
+    body: JSON.stringify({ context: { client: MUSIC_CLIENT }, videoId, isAudioOnly: true })
+  });
+  return albumOfSong(response);
+}
+
+// An OLAK5uy_ album playlist: oEmbed gives "Album - <title>" and its first video, whose Topic upload names the artist.
+export async function youtubeAlbumMetadata(list) {
+  const data = await fetchJson(`https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(`https://www.youtube.com/playlist?list=${list}`)}`);
+  const title = String(data.title || '').replace(/^Album\s*[-–]\s*/i, '');
+  const firstVideo = String(data.thumbnail_url || '').match(/\/vi\/([\w-]{11})\//)?.[1];
+  const first = firstVideo ? await youtubeMetadata(firstVideo).catch(() => null) : null;
+  return { title, artist: first?.artist || '', trackCount: null, year: null, upc: null, artwork: data.thumbnail_url || null, tracks: first ? [first] : [] };
 }

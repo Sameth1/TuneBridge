@@ -17,11 +17,11 @@ const musicSearchItem = (videoId, title, runs) => ({ musicResponsiveListItemRend
 } });
 
 test('accepts YouTube, youtu.be and mobile SoundCloud track links', () => {
-  assert.deepEqual(parseMusicUrl('https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=x'), { platform: 'youtube', id: 'dQw4w9WgXcQ', url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' });
+  assert.deepEqual(parseMusicUrl('https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=x'), { platform: 'youtube', kind: 'track', id: 'dQw4w9WgXcQ', url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' });
   assert.equal(parseMusicUrl('https://youtu.be/dQw4w9WgXcQ?si=abc').url, 'https://www.youtube.com/watch?v=dQw4w9WgXcQ');
   assert.equal(parseMusicUrl('https://music.youtube.com/watch?v=dQw4w9WgXcQ').platform, 'youtubeMusic');
   assert.equal(parseMusicUrl('https://m.soundcloud.com/artist/song?si=1').url, 'https://soundcloud.com/artist/song');
-  assert.throws(() => parseMusicUrl('https://soundcloud.com/artist/sets/album'));
+  assert.equal(parseMusicUrl('https://soundcloud.com/artist/sets/album?si=1').kind, 'album');
   assert.throws(() => parseMusicUrl('https://soundcloud.com/discover/sets'));
   assert.equal(isShortMusicLink('https://on.soundcloud.com/AbCd'), true);
   assert.equal(isShortMusicLink('https://example.com/AbCd'), false);
@@ -30,7 +30,9 @@ test('accepts YouTube, youtu.be and mobile SoundCloud track links', () => {
 test('compares Spotify "- Remastered" titles with Apple parenthesised titles', () => {
   assert.equal(normalize('Yesterday - Remastered 2009'), 'yesterday');
   assert.equal(sameTrackTitle('Yesterday - Remastered 2009', 'Yesterday (Remastered 2009)'), true);
-  assert.equal(sameTrackTitle('Yesterday - Remastered 2009', 'Yesterday'), false);
+  // A remaster is the same performance; platforms label it inconsistently, so it does not block a match.
+  assert.equal(sameTrackTitle('Yesterday - Remastered 2009', 'Yesterday'), true);
+  assert.equal(sameTrackTitle('Yesterday - Live', 'Yesterday'), false);
   assert.equal(normalize('Sen - Ben'), 'sen ben');
 });
 
@@ -118,6 +120,8 @@ test('removes video labels from titles but keeps version labels', () => {
   assert.equal(cleanVideoTitle('Divane [Official Music Video]'), 'Divane');
   assert.equal(cleanVideoTitle('Şımarık (Video Klip)'), 'Şımarık');
   assert.equal(cleanVideoTitle('Get Lucky (Live)'), 'Get Lucky (Live)');
+  assert.equal(cleanVideoTitle('Gülpembe HD Klip'), 'Gülpembe');
+  assert.equal(cleanVideoTitle('Video Killed the Radio Star'), 'Video Killed the Radio Star');
 });
 
 test('keeps only Topic and verified-artist uploads from YouTube search', () => {
@@ -134,5 +138,23 @@ test('keeps only Topic and verified-artist uploads from YouTube search', () => {
   assert.deepEqual(results.map(r => [r.url.slice(-11), r.title, r.artist, r.duration, r.topic]), [
     ['OuZWcgB4INw', 'Divane', 'Yaşar', 221000, false],
     ['abcdefghijk', 'Divane', 'Yaşar', 232000, true]
+  ]);
+});
+
+test('treats an artist channel as the artist\'s own only when its name matches the titled artist', () => {
+  const video = (videoId, title, channel, badge) => ({ videoRenderer: {
+    videoId, title: { runs: [{ text: title }] }, ownerText: { runs: [{ text: channel }] }, lengthText: { simpleText: '4:00' },
+    ownerBadges: [{ metadataBadgeRenderer: { style: badge } }]
+  } });
+  const results = parseVideoSearch({ contents: [
+    video('CnfCUIvIXYc', 'Barış Manço - Gülpembe HD Klip', 'barismancotv', 'BADGE_STYLE_TYPE_VERIFIED_ARTIST'),
+    video('ud3VWpbLpBU', 'Fairuz - Nassam Alayna Al Hawa', 'Andalusian Vibes', 'BADGE_STYLE_TYPE_VERIFIED_ARTIST'),
+    video('PY1Ue0ykOrA', 'Fairuz - Nassam Alayna El Hawa (Lyric Video) | فيروز - نسّم علينا الهوى', 'UMMENAVEVO', 'BADGE_STYLE_TYPE_VERIFIED'),
+    video('liveliveliv', 'Barış Manço - Gülpembe (1985 TRT)', 'TRT Arşiv', 'BADGE_STYLE_TYPE_VERIFIED')
+  ] });
+  assert.deepEqual(results.map(r => [r.videoId, r.title, r.artist, r.official]), [
+    ['CnfCUIvIXYc', 'Gülpembe', 'Barış Manço', 'artist'],
+    ['ud3VWpbLpBU', 'Nassam Alayna Al Hawa', 'Fairuz', 'label'],
+    ['PY1Ue0ykOrA', 'Nassam Alayna El Hawa', 'Fairuz', 'label']
   ]);
 });

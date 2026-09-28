@@ -60,7 +60,7 @@ const server = http.createServer(async (req, res) => {
         const image = data.song.artwork ? `<meta property="og:image" content="${escapeHTML(data.song.artwork)}">` : '';
         const publicBase = process.env.PUBLIC_BASE_URL || base;
         const canonical = escapeHTML(new URL(url.pathname + url.search, publicBase).href);
-        const metadata = `<meta property="og:type" content="music.song"><meta property="og:title" content="${title}"><meta property="og:description" content="${description}"><meta property="og:url" content="${canonical}">${image}<meta name="twitter:card" content="summary_large_image">`;
+        const metadata = `<meta property="og:type" content="${data.kind === 'album' ? 'music.album' : 'music.song'}"><meta property="og:title" content="${title}"><meta property="og:description" content="${description}"><meta property="og:url" content="${canonical}">${image}<meta name="twitter:card" content="summary_large_image">`;
         content = Buffer.from(content.toString().replace('</head>', `${metadata}</head>`));
       } catch { /* The page still displays a useful error in its UI. */ }
     }

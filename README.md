@@ -12,7 +12,7 @@ A Spotify recipient should not have to transcribe an Apple Music song title and 
 
 ## Features
 
-- Accepts **individual track links** from Apple Music, Spotify, YouTube / YouTube Music (including `youtu.be`), Deezer, and SoundCloud, plus app short links (`on.soundcloud.com`, `spotify.link`, `link.deezer.com`).
+- Accepts **track and album links** from Apple Music, Spotify, YouTube / YouTube Music (including `youtu.be` and `OLAK5uy_` album playlists), Deezer, and SoundCloud (sets), plus app short links (`on.soundcloud.com`, `spotify.link`, `link.deezer.com`).
 - Resolves track title, artist, cover art, album, duration, and ISRC when the sources provide them.
 - Shows direct track links only for matches supported by recording relationships or strict metadata comparison.
 - Falls back to a clearly marked platform search when a direct match is uncertain or unavailable.
@@ -35,16 +35,20 @@ Catalog coverage varies by track and country. A search button is a deliberate re
 
 ## How matching works
 
-1. **Parse and validate the input.** `lib.js` accepts known music domains and track URL formats; short share links are expanded by following their redirects. Album and playlist links are outside this MVP's scope.
+1. **Parse and validate the input.** `lib.js` accepts known music domains and track URL formats; short share links are expanded by following their redirects. User playlists are outside this MVP's scope; albums are resolved as described under *Albums* below.
 2. **Fetch source metadata.** Apple and Deezer provide catalog metadata. Spotify uses its Web API when credentials are configured, otherwise the public embed page (title, artists, duration). YouTube uses the watch page: auto-generated "Topic" uploads carry title, artist and album in their description; for music videos, "Artist - Title" is split and the video length is treated as unreliable. SoundCloud uses the track page data, including the label-supplied artist and ISRC when present. oEmbed is the fallback everywhere.
-3. **Collect verified cross-platform links.** MusicBrainz is consulted for Spotify inputs, and [Odesli](https://odesli.co) (song.link) for every input when `ODESLI_API_KEY` is set. Every Odesli result must agree with the source on title/version and artist before it is used.
+3. **Collect verified cross-platform links.** MusicBrainz is consulted for Spotify inputs, [ListenBrainz Labs](https://labs.api.listenbrainz.org/) suggests Spotify and Apple Music ids by artist and title (no key needed; each id is read back from the platform and checked like any other candidate), and [Odesli](https://odesli.co) (song.link) for every input when `ODESLI_API_KEY` is set. Every Odesli result must agree with the source on title/version and artist before it is used.
 4. **Recover missing metadata from artwork.** If the source still has only a title and cover, TuneBridge compares the cover with Apple catalog candidates for that title and accepts a nearly identical, unambiguous candidate.
-5. **Search the remaining catalogs.** Apple, Deezer, YouTube Music (songs only, falling back to YouTube uploads from Topic and verified-artist channels), SoundCloud and, with credentials, Spotify are searched. A candidate must agree on track title/version and artist, plus a close duration (≤ 6 s) or matching ISRC. Live, remix, acoustic, cover and other version labels are checked to reduce false matches. When the ISRC is known, Deezer and Spotify are looked up by ISRC directly. For a music-video source, a title and artist match is accepted only when every such catalog result is the same recording.
+5. **Search the remaining catalogs.** Apple (iTunes Search, then title-only search, then ListenBrainz ids confirmed via iTunes or Apple's song page), Deezer (plain and field search), YouTube Music (songs only, falling back to official YouTube uploads), SoundCloud (label-distributed tracks or the artist's own account only) and Spotify (Web API with credentials, ListenBrainz ids otherwise) are searched. Official YouTube uploads are Topic uploads, the artist's own verified channel (up to 90 s longer than the track for a music video), and verified label channels (plain "Artist - Title" uploads within 20 s). A remaster label does not block a match: it is the same performance. A candidate must agree on track title/version and artist, plus a close duration (≤ 6 s) or matching ISRC. Live, remix, acoustic, cover and other version labels are checked to reduce false matches. When the ISRC is known, Deezer and Spotify are looked up by ISRC directly. For a music-video source, a title and artist match is accepted only when every such catalog result is the same recording.
 6. **Label the result.** Verified URLs are shown as **“Şarkıyı doğrudan aç”** (open track directly): they open the track's own page, and the listener presses play. Platforms where the song could not be verified show **“Platformda ara”** (search on platform).
 
 This is a conservative matching system, not an audio fingerprinting service. Catalog records can be incomplete, and two releases can share metadata or artwork. The app does not stream music or start playback through a service API; opening a direct link hands control to that platform. YouTube Music has no separate song page, so its direct link is a watch URL, and the YouTube Music app may start playing it on open.
 
 YouTube Music search, YouTube's player and search endpoints and SoundCloud search are unofficial public web endpoints; if they change, those platforms fall back to search links until the parser is updated.
+
+### Albums
+
+An album link is read for its title, artist, track count, year and first tracks. Deezer is matched first because its album record carries the UPC: with a UPC, Deezer and the MusicBrainz release for that barcode give exact album links (Spotify, Apple, YouTube album playlists). The remaining platforms are searched and must agree on title, edition (Deluxe, Remastered, Live… are different releases), artist and track count. Without Spotify credentials, the album is found through one of its tracks: the track's Spotify page names its album, which is then checked. YouTube Music albums are found the same way through a track's YouTube Music page.
 
 ## Quick start
 
@@ -134,8 +138,9 @@ ios/                iOS app and Share Extension scaffold
 
 ## Current limitations
 
-- Album and playlist URLs are not accepted.
-- YouTube Music and SoundCloud frequently have only a search fallback because cross-platform recording links are sparse.
+- User playlists are not accepted.
+- YouTube and YouTube Music album pages are found only through MusicBrainz, a YouTube album input, or YouTube Music's own search; from some server IPs YouTube Music search returns no songs or albums, and then those two platforms fall back to search links for albums.
+- SoundCloud only links to label-distributed tracks or the artist's own account, so re-uploads show a search link instead.
 - Spotify oEmbed does not supply all track fields. When MusicBrainz and artwork matching both fail, artist and direct destinations may remain unknown.
 - ISRC identifies a recording, but catalogs may expose multiple releases or regional versions; a direct link does not guarantee playback without the destination service's normal access.
 - No persistent database, public abuse controls, user accounts, analytics, or automatic playback are included.
@@ -146,6 +151,7 @@ ios/                iOS app and Share Extension scaffold
 - [MusicBrainz API](https://musicbrainz.org/doc/MusicBrainz_API) and [rate limiting](https://musicbrainz.org/doc/MusicBrainz_API/Rate_Limiting)
 - [Apple iTunes Search API result fields](https://developer.apple.com/library/archive/documentation/AudioVideo/Conceptual/iTuneSearchAPI/UnderstandingSearchResults.html)
 - [Deezer API](https://developers.deezer.com/api)
+- [ListenBrainz Labs API](https://labs.api.listenbrainz.org/)
 
 TuneBridge is an independent project and is not affiliated with the music platforms above.
 

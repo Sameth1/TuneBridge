@@ -15,6 +15,9 @@ export function soundcloudSong(track) {
     isrc: /^[A-Z0-9]{12}$/i.test(publisher.isrc || '') ? publisher.isrc.toUpperCase() : null,
     artwork,
     url: track.permalink_url || null,
+    uploader: track.user?.username || '',
+    // Label-distributed tracks carry publisher metadata; anything else is only trusted from the artist's own account.
+    distributed: Boolean(publisher.artist || publisher.isrc),
     durationReliable: true
   };
 }
@@ -61,4 +64,34 @@ export async function searchSoundcloud(query) {
   const data = await fetchJson(`https://api-v2.soundcloud.com/search/tracks?q=${encodeURIComponent(query)}&client_id=${id}&limit=20`)
     .catch(error => { clientId.until = 0; throw error; });
   return (data.collection || []).map(soundcloudSong).filter(song => song?.url);
+}
+
+export function soundcloudAlbum(set) {
+  if (!set?.title) return null;
+  return {
+    title: set.title,
+    artist: set.publisher_metadata?.artist || set.user?.username || '',
+    trackCount: set.track_count || null,
+    year: (set.release_date || set.published_at || set.created_at || '').slice(0, 4) || null,
+    upc: set.publisher_metadata?.upc_or_ean || null,
+    artwork: (set.artwork_url || '').replace('-large.', '-t500x500.') || null,
+    url: set.permalink_url || null,
+    tracks: []
+  };
+}
+
+export async function soundcloudAlbumMetadata(url) {
+  const hydration = extractJsonAfter(await fetchText(url, { headers: { 'Accept-Language': 'en-US,en;q=0.9' } }), 'window.__sc_hydration = ');
+  const set = Array.isArray(hydration) ? hydration.find(entry => entry?.hydratable === 'playlist')?.data : null;
+  const album = soundcloudAlbum(set);
+  if (!album) throw new Error('SoundCloud set not found');
+  album.tracks = (set.tracks || []).filter(track => track.title).slice(0, 3).map(soundcloudSong);
+  return album;
+}
+
+export async function searchSoundcloudAlbums(query) {
+  const id = await soundcloudClientId();
+  if (!id) return [];
+  const data = await fetchJson(`https://api-v2.soundcloud.com/search/albums?q=${encodeURIComponent(query)}&client_id=${id}&limit=20`);
+  return (data.collection || []).map(soundcloudAlbum).filter(album => album?.url);
 }

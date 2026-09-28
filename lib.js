@@ -26,41 +26,55 @@ export class UserError extends Error {
   constructor(code, message) { super(message); this.code = code; }
 }
 
+// Returns { platform, kind: 'track' | 'album', id, url } with a canonical URL for that platform.
 export function parseMusicUrl(input) {
   let url;
   try { url = new URL(String(input).trim()); } catch { throw new UserError('invalid_url', 'Enter a valid music link.'); }
   if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new UserError('bad_protocol', 'The link must start with http or https.');
   const host = url.hostname.toLowerCase();
   const parts = url.pathname.split('/').filter(Boolean);
-  if (host === 'music.apple.com' || host === 'geo.music.apple.com') {
-    const id = url.searchParams.get('i') || (parts.includes('song') ? parts.at(-1) : null);
-    if (!/^\d+$/.test(id || '')) throw new UserError('apple_track_required', 'An Apple Music song link is required; album links are not supported.');
-    return { platform: 'apple', id, url: url.href };
+  if (host === 'music.apple.com' || host === 'geo.music.apple.com' || host === 'itunes.apple.com') {
+    const country = /^[a-z]{2}$/i.test(parts[0] || '') ? parts[0].toLowerCase() : 'us';
+    const song = url.searchParams.get('i') || (parts.includes('song') ? parts.at(-1) : null);
+    if (/^\d+$/.test(song || '')) return { platform: 'apple', kind: 'track', id: song, url: `https://music.apple.com/${country}/song/${song}` };
+    const album = parts.includes('album') ? parts.at(-1).replace(/^id/, '') : null;
+    if (/^\d+$/.test(album || '')) return { platform: 'apple', kind: 'album', id: album, url: `https://music.apple.com/${country}/album/${album}` };
+    throw new UserError('apple_track_required', 'An Apple Music song or album link is required.');
   }
   if (host === 'open.spotify.com' || host === 'spotify.com' || host === 'www.spotify.com') {
-    const i = parts.indexOf('track');
-    const id = i >= 0 ? parts[i + 1] : null;
-    if (!/^[A-Za-z0-9]{22}$/.test(id || '')) throw new UserError('spotify_track_required', 'A Spotify track link is required.');
-    return { platform: 'spotify', id, url: `https://open.spotify.com/track/${id}` };
+    for (const kind of ['track', 'album']) {
+      const i = parts.indexOf(kind);
+      const id = i >= 0 ? parts[i + 1] : null;
+      if (/^[A-Za-z0-9]{22}$/.test(id || '')) return { platform: 'spotify', kind, id, url: `https://open.spotify.com/${kind}/${id}` };
+    }
+    throw new UserError('spotify_track_required', 'A Spotify track or album link is required.');
   }
   if (YOUTUBE_HOSTS.includes(host)) {
+    const platform = host === 'music.youtube.com' ? 'youtubeMusic' : 'youtube';
     const id = host === 'youtu.be' ? parts[0]
       : parts[0] === 'watch' ? url.searchParams.get('v')
       : ['shorts', 'embed', 'live'].includes(parts[0]) ? parts[1] : null;
-    if (!/^[\w-]{11}$/.test(id || '')) throw new UserError('youtube_track_required', 'A YouTube or YouTube Music song link is required.');
-    return host === 'music.youtube.com'
-      ? { platform: 'youtubeMusic', id, url: youtubeUrl('youtubeMusic', id) }
-      : { platform: 'youtube', id, url: youtubeUrl('youtube', id) };
+    if (/^[\w-]{11}$/.test(id || '')) return { platform, kind: 'track', id, url: youtubeUrl(platform, id) };
+    // Official album playlists are auto-generated with an OLAK5uy_ id and play on both YouTube sites.
+    const list = url.searchParams.get('list');
+    if (parts[0] === 'playlist' && /^OLAK5uy_[\w-]+$/.test(list || '')) return { platform, kind: 'album', id: list, url: youtubeAlbumUrl(platform, list) };
+    throw new UserError('youtube_track_required', 'A YouTube or YouTube Music song or album link is required.');
   }
   if (host === 'www.deezer.com' || host === 'deezer.com') {
-    const i = parts.indexOf('track');
-    const id = i >= 0 ? parts[i + 1] : null;
-    if (!/^\d+$/.test(id || '')) throw new UserError('deezer_track_required', 'A Deezer track link is required.');
-    return { platform: 'deezer', id, url: `https://www.deezer.com/track/${id}` };
+    for (const kind of ['track', 'album']) {
+      const i = parts.indexOf(kind);
+      const id = i >= 0 ? parts[i + 1] : null;
+      if (/^\d+$/.test(id || '')) return { platform: 'deezer', kind, id, url: `https://www.deezer.com/${kind}/${id}` };
+    }
+    throw new UserError('deezer_track_required', 'A Deezer track or album link is required.');
   }
   if (host === 'soundcloud.com' || host === 'www.soundcloud.com' || host === 'm.soundcloud.com') {
-    if (parts.length < 2 || SOUNDCLOUD_RESERVED.includes(parts[0]) || SOUNDCLOUD_USER_PAGES.includes(parts[1])) throw new UserError('soundcloud_track_required', 'A SoundCloud track link is required.');
-    return { platform: 'soundcloud', id: parts.join('/'), url: `https://soundcloud.com/${parts.join('/')}` };
+    if (parts.length >= 3 && parts[1] === 'sets' && !SOUNDCLOUD_RESERVED.includes(parts[0])) {
+      const path = parts.slice(0, 3).join('/');
+      return { platform: 'soundcloud', kind: 'album', id: path, url: `https://soundcloud.com/${path}` };
+    }
+    if (parts.length < 2 || SOUNDCLOUD_RESERVED.includes(parts[0]) || SOUNDCLOUD_USER_PAGES.includes(parts[1])) throw new UserError('soundcloud_track_required', 'A SoundCloud track or album link is required.');
+    return { platform: 'soundcloud', kind: 'track', id: parts.join('/'), url: `https://soundcloud.com/${parts.join('/')}` };
   }
   throw new UserError('unsupported_platform', 'Apple Music, Spotify, YouTube Music, YouTube, Deezer and SoundCloud links are supported.');
 }
@@ -88,7 +102,6 @@ function versionTags(value) {
     speedup: ['sped up'],
     slowed: ['slowed'],
     cover: ['cover'],
-    remaster: ['remaster', 'remastered'],
     mono: ['mono'],
     stereo: ['stereo'],
     edit: ['edit'],
@@ -151,6 +164,45 @@ export function selectUniqueTitleArtist(source, candidates) {
   return matches[0];
 }
 
+// Album titles: Apple appends " - Single" / " - EP"; editions (Deluxe, Remastered, Live…) are different releases.
+const ALBUM_SUFFIX = /\s[-–—]\s(single|ep)$/i;
+const EDITIONS = {
+  deluxe: ['deluxe', 'expanded', 'special', 'collector', 'platinum', 'bonus', 'anniversary'],
+  remaster: ['remaster', 'remastered'],
+  live: ['live', 'canlı'],
+  acoustic: ['acoustic', 'akustik'],
+  instrumental: ['instrumental'],
+  remix: ['remixes', 'remixed'],
+  speed: ['sped up', 'slowed']
+};
+
+function editionTags(value) {
+  const title = String(value || '').toLocaleLowerCase('und');
+  return Object.entries(EDITIONS).filter(([, words]) => words.some(word =>
+    new RegExp(`(?<![\\p{L}\\p{N}])${word}(?![\\p{L}\\p{N}])`, 'u').test(title))).map(([tag]) => tag).join('|');
+}
+
+export function sameAlbumTitle(first, second) {
+  const a = String(first || '').replace(ALBUM_SUFFIX, '');
+  const b = String(second || '').replace(ALBUM_SUFFIX, '');
+  return Boolean(normalize(a)) && normalize(a) === normalize(b) && editionTags(a) === editionTags(b);
+}
+
+// Same title, edition and artist; a shared UPC settles it, otherwise the track counts must agree
+// (one track of slack only for the same release year, where a platform may hide a hidden or bonus track).
+export function albumMatch(source, candidate) {
+  if (source.upc && candidate.upc) return String(source.upc).replace(/^0+/, '') === String(candidate.upc).replace(/^0+/, '');
+  if (!sameAlbumTitle(source.title, candidate.title) || !artistsOverlap(source.artist, candidate.artist)) return false;
+  if (!source.trackCount || !candidate.trackCount) return true;
+  const gap = Math.abs(source.trackCount - candidate.trackCount);
+  return gap === 0 || (gap === 1 && Boolean(source.year) && source.year === candidate.year);
+}
+
+// "Barış Manço" → "barismanco": compares names across diacritics and spacing ("barismancotv", "sezen-aksu-official").
+export function compactName(value) {
+  return normalize(value).normalize('NFD').replace(/\p{M}/gu, '').replace(/ı/g, 'i').replace(/\s/g, '');
+}
+
 export function cleanChannelName(name) {
   return String(name || '').replace(/\s+-\s+Topic$/i, '').replace(/VEVO$/i, '').replace(/\s+(Official)(\s+(Channel|Music))?$/i, '').trim();
 }
@@ -177,6 +229,10 @@ export function cleanTrackUrl(platform, rawUrl) {
   }
   url.search = '';
   return url.href;
+}
+
+export function youtubeAlbumUrl(platform, list) {
+  return platform === 'youtubeMusic' ? `https://music.youtube.com/playlist?list=${list}` : `https://www.youtube.com/playlist?list=${list}`;
 }
 
 // A video id plays on both sites, so one id can serve YouTube and YouTube Music.

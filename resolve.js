@@ -1,12 +1,15 @@
-import { UserError, PLATFORMS, parseMusicUrl, isShortMusicLink, confidentMatch, selectUniqueTitleArtist, searchLinks, normalize, sameTrackTitle, artistsOverlap, cleanTrackUrl, youtubeUrl } from './lib.js';
+import { UserError, PLATFORMS, parseMusicUrl, isShortMusicLink, confidentMatch, selectUniqueTitleArtist, searchLinks, normalize, sameTrackTitle, sameAlbumTitle, artistsOverlap, compactName, cleanTrackUrl, youtubeUrl } from './lib.js';
 import { fetchJson, followRedirects } from './http.js';
 import { lookupSpotifyRecording, lookupIsrcRecording } from './musicbrainz.js';
 import { artworkSignature, artworkSimilarity, selectArtworkCandidate } from './artwork.js';
-import { spotifyMetadata, searchSpotify } from './spotify.js';
+import { spotifyMetadata, searchSpotify, searchSpotifyKeyless } from './spotify.js';
 import { youtubeMetadata, searchYoutubeMusic, searchYoutubeVideos } from './youtube.js';
 import { soundcloudMetadata, searchSoundcloud } from './soundcloud.js';
 import { fetchOdesli, odesliLinks } from './odesli.js';
 import { appleMusicConfigured, appleMusicSongById, appleMusicByIsrc, searchAppleMusic } from './applemusic.js';
+import { itunesSearch, itunesLookup, appleSong, applePageSong } from './apple.js';
+import { listenbrainzIds } from './listenbrainz.js';
+import { resolveAlbum } from './albums.js';
 
 async function sourceMetadata(input) {
   switch (input.platform) {
@@ -17,13 +20,18 @@ async function sourceMetadata(input) {
         const song = await appleMusicSongById(input.id, country).catch(() => null);
         if (song) return song;
       }
-      const data = await itunes(`https://itunes.apple.com/lookup?id=${input.id}&country=${encodeURIComponent(country)}&entity=song`);
-      const track = data.results?.find(x => x.wrapperType === 'track' && String(x.trackId) === input.id);
-      if (!track) throw new UserError('apple_not_found', 'This song was not found in the Apple Music catalog.');
+      const results = await itunesLookup([input.id], country).catch(() => null);
+      const track = results?.find(x => x.wrapperType === 'track' && String(x.trackId) === input.id);
+      if (!track) {
+        // iTunes rate-limited or missing the song: Apple's own song page has title, artist and duration.
+        const page = await applePageSong(input.id, country).catch(() => null);
+        if (page) return page;
+        throw new UserError('apple_not_found', 'This song was not found in the Apple Music catalog.');
+      }
       return { title: track.trackName, artist: track.artistName, album: track.collectionName, artwork: track.artworkUrl100?.replace('100x100bb', '600x600bb'), duration: track.trackTimeMillis, isrc: null };
     }
     case 'deezer': {
-      const track = await fetchJson(`https://api.deezer.com/track/${input.id}`);
+      const track = await fetchJson(`https://api.deezer.com/track/${input.id}`, { retry: true });
       if (!track.title || track.error) throw new UserError('deezer_not_found', 'This song was not found in the Deezer catalog.');
       return deezerSong(track);
     }
@@ -38,17 +46,16 @@ function deezerSong(track) {
   return { title: track.title, artist: track.artist?.name, album: track.album?.title, artwork: track.album?.cover_xl, duration: track.duration * 1000, isrc: track.isrc || null, url: track.link?.replace(/^http:/, 'https:') };
 }
 
-function appleSong(track) {
-  return { title: track.trackName, artist: track.artistName, album: track.collectionName, duration: track.trackTimeMillis, isrc: null, url: cleanTrackUrl('apple', track.trackViewUrl), track };
-}
-
 const query = song => `${normalize(song.title)} ${song.artist.split(',')[0]}`;
 
-// Strict matches first: same ISRC, then candidates that carry an ISRC (official releases), then closest duration.
+// Strict matches first: same ISRC, then candidates that carry an ISRC (official releases),
+// then the release on the source's album (not a later single or compilation), then closest duration.
 function rankMatches(song, candidates) {
   const score = candidate => (song.isrc && candidate.isrc === song.isrc ? 0 : candidate.isrc ? 1 : 2);
+  const sameAlbum = candidate => (song.album && candidate.album && sameAlbumTitle(song.album, candidate.album) ? 0 : 1);
   return candidates.filter(candidate => candidate.url && confidentMatch(song, candidate)).sort((a, b) =>
-    score(a) - score(b) || Math.abs((a.duration || 0) - song.duration) - Math.abs((b.duration || 0) - song.duration));
+    score(a) - score(b) || sameAlbum(a) - sameAlbum(b) ||
+    Math.abs((a.duration || 0) - song.duration) - Math.abs((b.duration || 0) - song.duration));
 }
 
 function pickCandidate(song, candidates) {
@@ -57,46 +64,12 @@ function pickCandidate(song, candidates) {
   return song.durationReliable === false || !song.duration ? selectUniqueTitleArtist(song, candidates.filter(c => c.url)) : null;
 }
 
-// iTunes Search allows roughly 20 requests a minute per IP and answers 403 beyond that:
-// keep under the limit by waiting briefly, retry a 403 once, and reuse recent answers.
-const appleCache = new Map();
-const itunesCalls = [];
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-
-async function itunes(url) {
-  const now = Date.now();
-  while (itunesCalls.length && itunesCalls[0] <= now - 60_000) itunesCalls.shift();
-  if (itunesCalls.length >= 18) {
-    const wait = itunesCalls[0] + 60_000 - now;
-    if (wait > 8000) throw new Error('iTunes rate limit');
-    await sleep(wait);
-  }
-  itunesCalls.push(Date.now());
-  try { return await fetchJson(url); }
-  catch (error) {
-    if (!/HTTP 403/.test(error.message)) throw error;
-    await sleep(2000);
-    return fetchJson(url);
-  }
-}
-
-async function appleSearch(term, country, limit = 20) {
-  const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&country=${country}&media=music&entity=song&limit=${limit}`;
-  const cached = appleCache.get(url);
-  if (cached && cached.until > Date.now()) return cached.results;
-  const data = await itunes(url);
-  const results = (data.results || []).filter(track => track.wrapperType === 'track');
-  if (appleCache.size >= 500) appleCache.delete(appleCache.keys().next().value);
-  appleCache.set(url, { results, until: Date.now() + 60 * 60 * 1000 });
-  return results;
-}
-
 async function findApple(song, country) {
   if (appleMusicConfigured()) {
     const official = await findAppleMusic(song, country).catch(() => null);
     if (official) return official;
   }
-  const candidates = (await appleSearch(query(song), country)).map(appleSong);
+  const candidates = (await itunesSearch(query(song), country).catch(() => [])).map(appleSong);
   const matches = rankMatches(song, candidates);
   if (matches.length > 1 && song.artwork) {
     const sourceImage = await artworkSignature(song.artwork);
@@ -109,7 +82,20 @@ async function findApple(song, country) {
       if (ranked[0]?.similarity >= 0.97) return ranked[0].candidate;
     }
   }
-  return matches[0] || pickCandidate(song, candidates);
+  const found = matches[0] || pickCandidate(song, candidates);
+  if (found) return found;
+  // The title alone finds songs whose artist is spelled differently on Apple (another script, "&" vs ",").
+  const byTitle = pickCandidate(song, (await itunesSearch(normalize(song.title), country, 'song', 50).catch(() => [])).map(appleSong));
+  return byTitle || findAppleByListenbrainz(song, country);
+}
+
+// ListenBrainz's Apple Music ids, confirmed through iTunes lookup or, when iTunes is rate-limited, Apple's song page.
+async function findAppleByListenbrainz(song, country) {
+  const ids = await listenbrainzIds('apple', song).catch(() => []);
+  if (!ids.length) return null;
+  let candidates = await itunesLookup(ids, country).then(results => results.filter(r => r.wrapperType === 'track').map(appleSong)).catch(() => null);
+  candidates ||= (await Promise.all(ids.map(id => applePageSong(id, country).catch(() => null)))).filter(Boolean);
+  return pickCandidate(song, candidates);
 }
 
 async function findAppleMusic(song, country) {
@@ -123,7 +109,7 @@ async function findAppleMusic(song, country) {
 async function findAppleByArtwork(song, country) {
   const sourceImage = await artworkSignature(song.artwork);
   if (!sourceImage) return null;
-  const candidates = (await appleSearch(normalize(song.title), country, 30))
+  const candidates = (await itunesSearch(normalize(song.title), country, 'song', 30))
     .filter(track => sameTrackTitle(song.title, track.trackName) && track.artworkUrl100).slice(0, 15);
   const scored = await Promise.all(candidates.map(async track => {
     const image = await artworkSignature(track.artworkUrl100.replace('100x100bb', '300x300bb'));
@@ -136,47 +122,63 @@ async function findAppleByArtwork(song, country) {
 async function findDeezer(song) {
   if (song.isrc) {
     // An ISRC identifies the exact recording, so this lookup needs no fuzzy comparison.
-    const track = await fetchJson(`https://api.deezer.com/track/isrc:${encodeURIComponent(song.isrc)}`).catch(() => null);
+    const track = await fetchJson(`https://api.deezer.com/track/isrc:${encodeURIComponent(song.isrc)}`, { retry: true }).catch(() => null);
     const agrees = track?.id && !track.error && track.isrc?.toUpperCase() === song.isrc.toUpperCase() &&
       (sameTrackTitle(song.title, track.title) || artistsOverlap(song.artist, track.artist?.name));
     if (agrees) return deezerSong(track);
   }
-  const data = await fetchJson(`https://api.deezer.com/search?q=${encodeURIComponent(query(song))}&limit=15`);
-  return pickCandidate(song, (data.data || []).map(deezerSong));
+  const search = async q => ((await fetchJson(`https://api.deezer.com/search?q=${encodeURIComponent(q)}&limit=15`, { retry: true })).data || []).map(deezerSong);
+  const found = pickCandidate(song, await search(query(song)));
+  if (found) return found;
+  // Deezer's field search is stricter about which words belong to the artist and which to the title.
+  return pickCandidate(song, await search(`artist:"${song.artist.split(',')[0]}" track:"${normalize(song.title)}"`));
 }
 
-const findSpotify = async song => pickCandidate(song, await searchSpotify(song));
+// Spotify Web API when credentials exist; otherwise (or when it finds nothing) ListenBrainz ids checked via embed pages.
+async function findSpotify(song) {
+  const viaApi = pickCandidate(song, await searchSpotify(song).catch(() => []));
+  return viaApi || pickCandidate(song, await searchSpotifyKeyless(song));
+}
 const asTarget = (platform, candidates) => candidates.map(candidate => ({ ...candidate, url: youtubeUrl(platform, candidate.videoId) }));
 
-// YouTube Music: the song itself — its "Songs" search, then the auto-generated Topic upload, then the official video.
+const ofKind = (uploads, kind) => uploads.filter(video => video.official === kind);
+
+// YouTube Music: the song itself — its "Songs" search, then the auto-generated Topic upload,
+// then an official upload of the audio, then the official video.
 async function findYoutubeMusic(song, country, videos) {
   const fromMusic = pickCandidate(song, await searchYoutubeMusic(query(song), country).catch(() => []));
   if (fromMusic) return fromMusic;
   const uploads = asTarget('youtubeMusic', await videos());
-  return pickCandidate(song, uploads.filter(video => video.topic)) || pickCandidate(song, uploads) || closestOfficialVideo(song, uploads);
+  return pickCandidate(song, ofKind(uploads, 'topic')) || pickCandidate(song, uploads) ||
+    closestOfficialVideo(song, ofKind(uploads, 'artist')) || closestOfficialVideo(song, ofKind(uploads, 'label'));
 }
 
-// YouTube: the artist's official music video first, then the Topic upload of the song.
+// YouTube: the artist's own music video first, then the Topic upload, then the label's upload.
 async function findYoutube(song, country, videos) {
   const uploads = asTarget('youtube', await videos());
-  return closestOfficialVideo(song, uploads.filter(video => !video.topic)) || pickCandidate(song, uploads);
+  return closestOfficialVideo(song, ofKind(uploads, 'artist')) || pickCandidate(song, ofKind(uploads, 'topic')) ||
+    closestOfficialVideo(song, ofKind(uploads, 'label')) || pickCandidate(song, uploads);
 }
 
-// An official music video of the same song can run longer than the track (intro, outro), so allow up to 90 s.
+// An official music video of the same song can run longer than the track (intro, outro): up to 90 s on the
+// artist's own channel, 20 s on label channels, which also carry live and TV recordings.
 function closestOfficialVideo(song, videos) {
   if (!song.duration) return null;
   return videos
     .filter(video => sameTrackTitle(song.title, video.title) && artistsOverlap(song.artist, video.artist) && video.duration &&
-      Math.abs(video.duration - song.duration) <= 90_000)
+      Math.abs(video.duration - song.duration) <= (video.official === 'label' ? 20_000 : 90_000))
     .sort((a, b) => Math.abs(a.duration - song.duration) - Math.abs(b.duration - song.duration))[0] || null;
 }
-const findSoundcloud = async song => pickCandidate(song, await searchSoundcloud(query(song)));
+// SoundCloud is full of re-uploads: accept label-distributed tracks and the artist's own account only.
+const ownAccount = (song, uploader) => compactName(song.artist.split(',')[0]).length >= 3 && compactName(uploader).includes(compactName(song.artist.split(',')[0]));
+const findSoundcloud = async song => pickCandidate(song, (await searchSoundcloud(query(song))).filter(track => track.distributed || ownAccount(song, track.uploader)));
 
 const acceptsTrackUrl = url => { try { parseMusicUrl(url); return true; } catch { return false; } };
 
 export async function resolveMusicUrl(rawUrl, country = 'us') {
   const source = isShortMusicLink(rawUrl) ? await followRedirects(String(rawUrl).trim(), acceptsTrackUrl) : rawUrl;
   const input = parseMusicUrl(source);
+  if (input.kind === 'album') return resolveAlbum(input, country);
   const song = { durationReliable: true, ...await sourceMetadata(input) };
   const exact = { [input.platform]: input.url };
   const add = links => { for (const [platform, url] of Object.entries(links || {})) exact[platform] ||= url; };
@@ -204,9 +206,14 @@ export async function resolveMusicUrl(rawUrl, country = 'us') {
   }
 
   const knownIsrc = song.isrc;
+  const guessedDuration = !song.durationReliable;
   if (song.artist) {
+    // Two phrasings: uploads are usually titled "Artist - Title", Topic uploads just "Title".
     let videoSearch;
-    const videos = () => (videoSearch ||= searchYoutubeVideos(query(song), country).catch(() => []));
+    const videos = () => (videoSearch ||= Promise.all([
+      searchYoutubeVideos(`${song.artist.split(',')[0]} - ${song.title}`, country).catch(() => []),
+      searchYoutubeVideos(query(song), country).catch(() => [])
+    ]).then(([first, second]) => [...first, ...second].filter((video, i, all) => all.findIndex(v => v.videoId === video.videoId) === i)));
     const searches = {
       apple: () => findApple(song, country), deezer: () => findDeezer(song), spotify: () => findSpotify(song),
       youtubeMusic: () => findYoutubeMusic(song, country, videos), youtube: () => findYoutube(song, country, videos),
@@ -226,6 +233,13 @@ export async function resolveMusicUrl(rawUrl, country = 'us') {
       if (!song.duration || !song.durationReliable) Object.assign(song, { duration: reference.duration || song.duration, durationReliable: true });
     }
     song.isrc ||= found.deezer?.isrc || found.spotify?.isrc || found.soundcloud?.isrc || null;
+    // A video's length is only a hint; once a catalog supplied the real duration, retry the platforms
+    // that could not be matched without it.
+    if (guessedDuration && song.durationReliable) {
+      const retry = tasks.filter(([platform]) => !exact[platform]);
+      const again = await Promise.allSettled(retry.map(([platform]) => searches[platform]()));
+      again.forEach((result, i) => { if (result.status === 'fulfilled' && result.value?.url) exact[retry[i][0]] ||= result.value.url; });
+    }
   }
 
   if (song.isrc && PLATFORMS.some(platform => !exact[platform.id])) {
@@ -246,6 +260,7 @@ export async function resolveMusicUrl(rawUrl, country = 'us') {
 
   const links = searchLinks(song.title, song.artist);
   return {
+    kind: 'track',
     song: { title: song.title, artist: song.artist, album: song.album, artwork: song.artwork, duration: song.duration },
     sourcePlatform: input.platform,
     platforms: PLATFORMS.map(platform => ({ ...platform, url: exact[platform.id] || links[platform.id], exact: Boolean(exact[platform.id]) }))

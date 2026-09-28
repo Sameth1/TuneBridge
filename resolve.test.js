@@ -80,7 +80,7 @@ test('a SoundCloud link with an ISRC finds Deezer by ISRC and YouTube by metadat
   } finally { mock.restore(); }
 });
 
-test('a music video matches the unique catalog recording but not an ambiguous one', async () => {
+test('a music video settles an ambiguous catalog once another catalog supplies the real duration', async () => {
   const player = { videoDetails: { title: 'Tarkan - Şımarık (Official Video)', author: 'TarkanVEVO', lengthSeconds: '265', shortDescription: 'Official video' } };
   const mock = mockFetch([
     ['www.youtube.com/watch', `<script>var ytInitialPlayerResponse = ${JSON.stringify(player)};</script>`],
@@ -92,7 +92,8 @@ test('a music video matches the unique catalog recording but not an ambiguous on
     const byId = Object.fromEntries(result.platforms.map(p => [p.id, p]));
     assert.equal(result.song.artist, 'Tarkan');
     assert.equal(byId.apple.exact, true);
-    assert.equal(byId.deezer.exact, false);
+    // Two Deezer versions make the video ambiguous; Apple's duration then picks the matching one.
+    assert.equal(byId.deezer.url, 'https://www.deezer.com/track/11');
     assert.equal(result.song.duration, 237000);
   } finally { mock.restore(); }
 });

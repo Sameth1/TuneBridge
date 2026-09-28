@@ -12,8 +12,22 @@ async function request(url, options = {}) {
   } finally { clearTimeout(timer); }
 }
 
-export const fetchJson = (url, options = {}) => request(url, options);
-export const fetchText = (url, options = {}) => request(url, { ...options, as: 'text' });
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const transient = error => /HTTP (429|5\d\d)$/.test(error.message) || error instanceof SyntaxError;
+
+// `retry: true` repeats a request once after a rate limit, a server error, or an HTML
+// bot-check page where JSON was expected; catalogs such as Deezer do this intermittently.
+async function withRetry(url, options) {
+  try { return await request(url, options); }
+  catch (error) {
+    if (!options.retry || !transient(error)) throw error;
+    await sleep(1200);
+    return request(url, options);
+  }
+}
+
+export const fetchJson = (url, options = {}) => withRetry(url, options);
+export const fetchText = (url, options = {}) => withRetry(url, { ...options, as: 'text' });
 
 // Follows short-link redirects by hand so every hop can be checked before it is requested.
 export async function followRedirects(url, accept, hops = 4) {

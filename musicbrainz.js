@@ -1,4 +1,4 @@
-import { normalize, parseMusicUrl, confidentMatch } from './lib.js';
+import { normalize, parseMusicUrl, confidentMatch, youtubeAlbumUrl } from './lib.js';
 
 let queue = Promise.resolve();
 let lastRequest = 0;
@@ -43,6 +43,7 @@ export function extractPlatformLinks(recording, country = 'us') {
   for (const relation of relations) {
     try {
       const parsed = parseMusicUrl(relation.url?.resource);
+      if (parsed.kind !== 'track') continue;
       if (!choices[parsed.platform]) choices[parsed.platform] = [];
       choices[parsed.platform].push(parsed.url);
     } catch { /* Skip album, artist and unsupported links. */ }
@@ -95,4 +96,35 @@ export async function lookupIsrcRecording(isrc, source, country = 'us') {
   eligible.sort((a, b) => Object.keys(extractPlatformLinks(b, country)).length - Object.keys(extractPlatformLinks(a, country)).length);
   const selected = eligible[0];
   return { title: selected.title, duration: selected.length, links: extractPlatformLinks(selected, country) };
+}
+
+// Album links on a MusicBrainz release. Apple links are rewritten to the visitor's storefront,
+// and an OLAK5uy_ album playlist serves both YouTube sites.
+export function extractAlbumLinks(release, country = 'us') {
+  const links = {};
+  for (const relation of release?.relations || []) {
+    let parsed;
+    try { parsed = parseMusicUrl(relation.url?.resource); } catch { continue; }
+    if (parsed.kind !== 'album') continue;
+    if (parsed.platform === 'apple') links.apple ||= `https://music.apple.com/${country}/album/${parsed.id}`;
+    else if (parsed.platform === 'youtube' || parsed.platform === 'youtubeMusic') {
+      links.youtubeMusic ||= youtubeAlbumUrl('youtubeMusic', parsed.id);
+      links.youtube ||= youtubeAlbumUrl('youtube', parsed.id);
+    } else links[parsed.platform] ||= parsed.url;
+  }
+  return links;
+}
+
+const digits = value => String(value || '').replace(/^0+/, '');
+
+export async function lookupReleaseByBarcode(upc, country = 'us') {
+  if (!/^\d{8,14}$/.test(upc || '')) return {};
+  const search = await getMusicBrainz(`https://musicbrainz.org/ws/2/release?query=barcode:${upc}&fmt=json`);
+  const ids = (search?.releases || []).filter(release => digits(release.barcode) === digits(upc)).slice(0, 2).map(release => release.id);
+  const links = {};
+  for (const id of ids) {
+    const release = await getMusicBrainz(`https://musicbrainz.org/ws/2/release/${id}?inc=url-rels&fmt=json`);
+    for (const [platform, url] of Object.entries(extractAlbumLinks(release, country))) links[platform] ||= url;
+  }
+  return links;
 }

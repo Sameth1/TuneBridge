@@ -74,9 +74,13 @@ function render(data, shareUrl) {
   document.title = `${data.song.title} — TuneBridge`;
   document.querySelector('#song-title').textContent = data.song.title;
   document.querySelector('#song-artist').textContent = data.song.artist || t('unknownArtist');
-  const album = data.song.album || '';
+  const isAlbum = data.kind === 'album';
+  // An album shows "ALBUM · 14 songs · 2001"; a song shows its album and duration.
+  const album = isAlbum
+    ? [t('albumLabel'), data.song.trackCount ? t('trackCount')(data.song.trackCount) : '', data.song.year || ''].filter(Boolean).join(' · ')
+    : data.song.album || '';
   document.querySelector('#song-album').textContent = album;
-  const seconds = data.song.duration ? Math.round(data.song.duration / 1000) : 0;
+  const seconds = !isAlbum && data.song.duration ? Math.round(data.song.duration / 1000) : 0;
   document.querySelector('#song-duration').textContent = seconds ? `${album ? ' · ' : ''}${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}` : '';
   const artwork = document.querySelector('#artwork');
   artwork.replaceChildren();
@@ -120,7 +124,7 @@ function render(data, shareUrl) {
     name.textContent = platform.name;
     const state = document.createElement('span');
     state.className = 'platform-state';
-    state.textContent = platform.exact ? t('openDirect') : t('searchPlatform');
+    state.textContent = platform.exact ? t(isAlbum ? 'openAlbum' : 'openDirect') : t('searchPlatform');
     details.append(name, state);
     const arrow = document.createElement('span');
     arrow.className = 'platform-arrow';
