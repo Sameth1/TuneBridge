@@ -17,8 +17,9 @@ const musicSearchItem = (videoId, title, runs) => ({ musicResponsiveListItemRend
 } });
 
 test('accepts YouTube, youtu.be and mobile SoundCloud track links', () => {
-  assert.equal(parseMusicUrl('https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=x').url, 'https://music.youtube.com/watch?v=dQw4w9WgXcQ');
-  assert.equal(parseMusicUrl('https://youtu.be/dQw4w9WgXcQ?si=abc').url, 'https://music.youtube.com/watch?v=dQw4w9WgXcQ');
+  assert.deepEqual(parseMusicUrl('https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=x'), { platform: 'youtube', id: 'dQw4w9WgXcQ', url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ' });
+  assert.equal(parseMusicUrl('https://youtu.be/dQw4w9WgXcQ?si=abc').url, 'https://www.youtube.com/watch?v=dQw4w9WgXcQ');
+  assert.equal(parseMusicUrl('https://music.youtube.com/watch?v=dQw4w9WgXcQ').platform, 'youtubeMusic');
   assert.equal(parseMusicUrl('https://m.soundcloud.com/artist/song?si=1').url, 'https://soundcloud.com/artist/song');
   assert.throws(() => parseMusicUrl('https://soundcloud.com/artist/sets/album'));
   assert.throws(() => parseMusicUrl('https://soundcloud.com/discover/sets'));
@@ -58,7 +59,7 @@ test('parses YouTube Music song search results', () => {
     musicSearchItem('abcdefghijk', 'Divane', [artistRun('Yaşar'), { text: ' • ' }, { text: 'Divane' }, { text: ' • ' }, { text: '4:12' }]),
     musicSearchItem('bad', 'Broken', [])
   ] } }] } } };
-  assert.deepEqual(parseMusicSearch(response), [{ title: 'Divane', artist: 'Yaşar', duration: 252000, isrc: null, url: 'https://music.youtube.com/watch?v=abcdefghijk' }]);
+  assert.deepEqual(parseMusicSearch(response), [{ title: 'Divane', artist: 'Yaşar', duration: 252000, isrc: null, videoId: 'abcdefghijk', url: 'https://music.youtube.com/watch?v=abcdefghijk' }]);
 });
 
 test('reads SoundCloud publisher metadata including ISRC', () => {
@@ -100,7 +101,7 @@ test('keeps only Odesli links whose entity agrees with the source song', () => {
   };
   const result = odesliLinks(data, { title: 'Divane', artist: '' });
   assert.equal(result.artist, 'Yaşar');
-  assert.deepEqual(result.links, { spotify: 'https://open.spotify.com/track/3V9Cf4pENsRh02WTMJ726n', youtube: 'https://music.youtube.com/watch?v=abcdefghijk' });
+  assert.deepEqual(result.links, { spotify: 'https://open.spotify.com/track/3V9Cf4pENsRh02WTMJ726n', youtubeMusic: 'https://music.youtube.com/watch?v=abcdefghijk' });
   assert.equal(cleanTrackUrl('apple', 'https://geo.music.apple.com/us/album/_/1?i=3&mt=1&app=music&at=aff'), 'https://geo.music.apple.com/us/album/_/1?i=3');
 });
 

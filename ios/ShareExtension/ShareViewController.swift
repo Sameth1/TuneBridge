@@ -16,11 +16,11 @@ final class ShareViewController: UIViewController {
         title.textColor = .white
         title.font = .boldSystemFont(ofSize: 26)
 
-        statusLabel.text = "Şarkı bağlantısı hazırlanıyor…"
+        statusLabel.text = String(localized: "share.preparing")
         statusLabel.textColor = .lightGray
         statusLabel.numberOfLines = 0
 
-        copyButton.setTitle("Ortak bağlantıyı kopyala", for: .normal)
+        copyButton.setTitle(String(localized: "share.copyButton"), for: .normal)
         copyButton.titleLabel?.font = .boldSystemFont(ofSize: 17)
         copyButton.tintColor = UIColor(red: 0.84, green: 0.70, blue: 1, alpha: 1)
         copyButton.isEnabled = false
@@ -47,7 +47,7 @@ final class ShareViewController: UIViewController {
             $0.hasItemConformingToTypeIdentifier(UTType.url.identifier) ||
             $0.hasItemConformingToTypeIdentifier(UTType.plainText.identifier)
         }) else {
-            statusLabel.text = "Bu paylaşımda bağlantı bulunamadı."
+            statusLabel.text = String(localized: "share.noLink")
             return
         }
         let type = provider.hasItemConformingToTypeIdentifier(UTType.url.identifier)
@@ -60,7 +60,7 @@ final class ShareViewController: UIViewController {
 
     private func prepare(_ raw: String?) {
         guard let raw else {
-            statusLabel.text = "Desteklenen bir müzik bağlantısı bulunamadı."
+            statusLabel.text = String(localized: "share.unsupported")
             return
         }
         let linkText = raw.range(of: #"https?://[^\s]+"#, options: .regularExpression).map { String(raw[$0]) } ?? raw
@@ -69,12 +69,12 @@ final class ShareViewController: UIViewController {
               let base = Bundle.main.object(forInfoDictionaryKey: "ShareBaseURL") as? String,
               !base.contains("YOUR_DOMAIN_HERE"),
               var components = URLComponents(string: base + "/s") else {
-            statusLabel.text = "Desteklenen bir müzik bağlantısı bulunamadı."
+            statusLabel.text = String(localized: "share.unsupported")
             return
         }
         components.queryItems = [URLQueryItem(name: "url", value: source.absoluteString)]
         smartURL = components.url
-        statusLabel.text = "Hazır. Bağlantıyı kopyalayıp WhatsApp veya başka bir uygulamada paylaş."
+        statusLabel.text = String(localized: "share.ready")
         copyButton.isEnabled = smartURL != nil
     }
 

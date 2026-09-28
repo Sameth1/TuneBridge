@@ -1,5 +1,5 @@
 import { fetchJson, fetchText, extractJsonAfter, findAllDeep } from './http.js';
-import { cleanChannelName, splitArtistTitle, artistsOverlap } from './lib.js';
+import { cleanChannelName, splitArtistTitle, artistsOverlap, youtubeUrl } from './lib.js';
 
 // Consent cookies keep EU visitors from being redirected to consent.youtube.com.
 const PAGE_HEADERS = { 'Accept-Language': 'en-US,en;q=0.9', Cookie: 'SOCS=CAI; CONSENT=YES+1' };
@@ -103,7 +103,8 @@ export function parseMusicSearch(response) {
       artist: artist || '',
       duration: parseDuration(durationText),
       isrc: null,
-      url: `https://music.youtube.com/watch?v=${videoId}`
+      videoId,
+      url: youtubeUrl('youtubeMusic', videoId)
     };
   }).filter(candidate => candidate?.title);
 }
@@ -134,7 +135,8 @@ export function parseVideoSearch(response) {
       duration: parseDuration(video.lengthText?.simpleText),
       isrc: null,
       topic,
-      url: `https://music.youtube.com/watch?v=${video.videoId}`
+      videoId: video.videoId,
+      url: youtubeUrl('youtube', video.videoId)
     };
   }).filter(Boolean);
 }

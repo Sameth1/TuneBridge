@@ -1,0 +1,6 @@
+/* Share extension. */
+"share.preparing" = "Preparing the song link…";
+"share.copyButton" = "Copy shared link";
+"share.noLink" = "No link was found in this share.";
+"share.unsupported" = "No supported music link was found.";
+"share.ready" = "Ready. Copy the link and share it on WhatsApp or any other app.";

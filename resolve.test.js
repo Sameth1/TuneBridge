@@ -50,7 +50,8 @@ test('a YouTube Music link resolves to exact Apple, Deezer and SoundCloud tracks
     const result = await resolveMusicUrl('https://youtu.be/abcdefghijk', 'tr');
     const byId = Object.fromEntries(result.platforms.map(p => [p.id, p]));
     assert.equal(result.song.artist, 'Yaşar');
-    assert.equal(byId.youtube.url, 'https://music.youtube.com/watch?v=abcdefghijk');
+    assert.equal(byId.youtube.url, 'https://www.youtube.com/watch?v=abcdefghijk');
+    assert.equal(byId.youtubeMusic.url, 'https://music.youtube.com/watch?v=abcdefghijk');
     assert.equal(byId.apple.url, 'https://music.apple.com/tr/album/x/9?i=1');
     assert.equal(byId.deezer.url, 'https://www.deezer.com/track/11');
     assert.equal(byId.soundcloud.url, 'https://soundcloud.com/dmc/divane');
@@ -59,7 +60,7 @@ test('a YouTube Music link resolves to exact Apple, Deezer and SoundCloud tracks
   } finally { mock.restore(); }
 });
 
-test('a SoundCloud link with an ISRC finds Deezer by ISRC and YouTube Music by metadata', async () => {
+test('a SoundCloud link with an ISRC finds Deezer by ISRC and YouTube by metadata', async () => {
   const hydration = [{ hydratable: 'sound', data: { title: 'Divane', full_duration: 252000, permalink_url: 'https://soundcloud.com/dmc/divane', user: { username: 'DMC' }, publisher_metadata: { artist: 'Yaşar', isrc: 'TRA111900001' } } }];
   const mock = mockFetch([
     ['soundcloud.com/dmc/divane', `<script>window.__sc_hydration = ${JSON.stringify(hydration)};</script>`],
@@ -71,7 +72,8 @@ test('a SoundCloud link with an ISRC finds Deezer by ISRC and YouTube Music by m
     const result = await resolveMusicUrl('https://m.soundcloud.com/dmc/divane?si=share', 'tr');
     const byId = Object.fromEntries(result.platforms.map(p => [p.id, p]));
     assert.equal(byId.deezer.url, 'https://www.deezer.com/track/11');
-    assert.equal(byId.youtube.url, 'https://music.youtube.com/watch?v=abcdefghijk');
+    assert.equal(byId.youtubeMusic.url, 'https://music.youtube.com/watch?v=abcdefghijk');
+    assert.equal(byId.youtube.url, 'https://www.youtube.com/watch?v=abcdefghijk');
     assert.equal(byId.apple.exact, true);
     assert.equal(byId.spotify.exact, false);
     assert.ok(!mock.calls.some(url => url.includes('api.deezer.com/search')));
@@ -92,5 +94,27 @@ test('a music video matches the unique catalog recording but not an ambiguous on
     assert.equal(byId.apple.exact, true);
     assert.equal(byId.deezer.exact, false);
     assert.equal(result.song.duration, 237000);
+  } finally { mock.restore(); }
+});
+
+test('YouTube Music gets the song while YouTube gets the official music video', async () => {
+  const video = (videoId, title, channel, length, badge) => ({ videoRenderer: {
+    videoId, title: { runs: [{ text: title }] }, ownerText: { runs: [{ text: channel }] }, lengthText: { simpleText: length },
+    ownerBadges: badge ? [{ metadataBadgeRenderer: { style: badge } }] : []
+  } });
+  const mock = mockFetch([
+    ['api.deezer.com/track/555', deezerTrack(555, 'Divane', 'Yaşar', 232, null)],
+    ['music.youtube.com/youtubei/v1/search', ytmSearch([['songsongson', 'Divane', 'Yaşar', '3:52']])],
+    ['www.youtube.com/youtubei/v1/search', { contents: [
+      video('fanfanfanfa', 'Yaşar - Divane', 'Yaşar', '3:58'),
+      video('officialvid', 'Yaşar - Divane (Official Video)', 'Yaşar', '4:05', 'BADGE_STYLE_TYPE_VERIFIED_ARTIST'),
+      video('songsongson', 'Divane', 'Yaşar - Topic', '3:52')
+    ] }]
+  ]);
+  try {
+    const result = await resolveMusicUrl('https://www.deezer.com/track/555');
+    const byId = Object.fromEntries(result.platforms.map(p => [p.id, p]));
+    assert.equal(byId.youtubeMusic.url, 'https://music.youtube.com/watch?v=songsongson');
+    assert.equal(byId.youtube.url, 'https://www.youtube.com/watch?v=officialvid');
   } finally { mock.restore(); }
 });

@@ -1,9 +1,11 @@
+// Icons are the brands' marks from Simple Icons (CC0), drawn on the brand colour.
 export const PLATFORMS = [
-  { id: 'apple', name: 'Apple Music', mark: '♫', color: '#fb5b6b' },
-  { id: 'spotify', name: 'Spotify', mark: '◉', color: '#1ed760' },
-  { id: 'youtube', name: 'YouTube Music', mark: '▶', color: '#ff4040' },
-  { id: 'deezer', name: 'Deezer', mark: '▥', color: '#a970ff' },
-  { id: 'soundcloud', name: 'SoundCloud', mark: '☁', color: '#ff8b3d' }
+  { id: 'apple', name: 'Apple Music', icon: '/icons/apple.svg', color: '#fa243c' },
+  { id: 'spotify', name: 'Spotify', icon: '/icons/spotify.svg', color: '#000000' },
+  { id: 'youtubeMusic', name: 'YouTube Music', icon: '/icons/youtubeMusic.svg', color: '#ff0000' },
+  { id: 'youtube', name: 'YouTube', icon: '/icons/youtube.svg', color: '#ff0000' },
+  { id: 'deezer', name: 'Deezer', icon: '/icons/deezer.svg', color: '#a238ff' },
+  { id: 'soundcloud', name: 'SoundCloud', icon: '/icons/soundcloud.svg', color: '#ff5500' }
 ];
 
 const YOUTUBE_HOSTS = ['music.youtube.com', 'www.youtube.com', 'youtube.com', 'm.youtube.com', 'youtu.be'];
@@ -46,7 +48,9 @@ export function parseMusicUrl(input) {
       : parts[0] === 'watch' ? url.searchParams.get('v')
       : ['shorts', 'embed', 'live'].includes(parts[0]) ? parts[1] : null;
     if (!/^[\w-]{11}$/.test(id || '')) throw new UserError('youtube_track_required', 'A YouTube or YouTube Music song link is required.');
-    return { platform: 'youtube', id, url: `https://music.youtube.com/watch?v=${id}` };
+    return host === 'music.youtube.com'
+      ? { platform: 'youtubeMusic', id, url: youtubeUrl('youtubeMusic', id) }
+      : { platform: 'youtube', id, url: youtubeUrl('youtube', id) };
   }
   if (host === 'www.deezer.com' || host === 'deezer.com') {
     const i = parts.indexOf('track');
@@ -58,7 +62,7 @@ export function parseMusicUrl(input) {
     if (parts.length < 2 || SOUNDCLOUD_RESERVED.includes(parts[0]) || SOUNDCLOUD_USER_PAGES.includes(parts[1])) throw new UserError('soundcloud_track_required', 'A SoundCloud track link is required.');
     return { platform: 'soundcloud', id: parts.join('/'), url: `https://soundcloud.com/${parts.join('/')}` };
   }
-  throw new UserError('unsupported_platform', 'Apple Music, Spotify, YouTube Music, Deezer and SoundCloud links are supported.');
+  throw new UserError('unsupported_platform', 'Apple Music, Spotify, YouTube Music, YouTube, Deezer and SoundCloud links are supported.');
 }
 
 const SUFFIX_WORDS = 'remaster|remastered|live|edit|version|versiyon|mix|remix|feat|ft|with|acoustic|akustik|mono|stereo|from|bonus|demo|instrumental|single|radio|canlı|sped up|slowed';
@@ -167,12 +171,17 @@ export function cleanTrackUrl(platform, rawUrl) {
     if (url.hostname === 'geo.music.apple.com' || url.hostname === 'music.apple.com') return url.href;
     return null;
   }
-  if (platform === 'youtube') {
+  if (platform === 'youtube' || platform === 'youtubeMusic') {
     const id = url.searchParams.get('v');
-    return /^[\w-]{11}$/.test(id || '') ? `https://music.youtube.com/watch?v=${id}` : null;
+    return /^[\w-]{11}$/.test(id || '') ? youtubeUrl(platform, id) : null;
   }
   url.search = '';
   return url.href;
+}
+
+// A video id plays on both sites, so one id can serve YouTube and YouTube Music.
+export function youtubeUrl(platform, id) {
+  return platform === 'youtubeMusic' ? `https://music.youtube.com/watch?v=${id}` : `https://www.youtube.com/watch?v=${id}`;
 }
 
 export function searchLinks(title, artist) {
@@ -180,7 +189,8 @@ export function searchLinks(title, artist) {
   return {
     apple: `https://music.apple.com/search?term=${q}`,
     spotify: `https://open.spotify.com/search/${q}`,
-    youtube: `https://music.youtube.com/search?q=${q}`,
+    youtubeMusic: `https://music.youtube.com/search?q=${q}`,
+    youtube: `https://www.youtube.com/results?search_query=${q}`,
     deezer: `https://www.deezer.com/search/${q}`,
     soundcloud: `https://soundcloud.com/search/sounds?q=${q}`
   };

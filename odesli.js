@@ -1,7 +1,7 @@
 import { fetchJson } from './http.js';
 import { sameTrackTitle, artistsOverlap, cleanChannelName, splitArtistTitle, cleanTrackUrl } from './lib.js';
 
-const PLATFORM_KEYS = { apple: ['appleMusic', 'itunes'], spotify: ['spotify'], youtube: ['youtubeMusic', 'youtube'], deezer: ['deezer'], soundcloud: ['soundcloud'] };
+const PLATFORM_KEYS = { apple: ['appleMusic', 'itunes'], spotify: ['spotify'], youtubeMusic: ['youtubeMusic'], youtube: ['youtube'], deezer: ['deezer'], soundcloud: ['soundcloud'] };
 
 // YouTube entities carry the channel as artist and sometimes "Artist - Title" as title.
 export function entityAgrees(song, entity) {

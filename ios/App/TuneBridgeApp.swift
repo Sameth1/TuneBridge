@@ -17,14 +17,14 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 20) {
             Text("TuneBridge")
                 .font(.largeTitle.bold())
-            Text("Müziği herkes kendi uygulamasında açsın.")
+            Text("app.tagline")
                 .foregroundStyle(.secondary)
-            TextField("Müzik bağlantısını yapıştır", text: $sourceURL)
+            TextField("app.pastePlaceholder", text: $sourceURL)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .keyboardType(.URL)
                 .textFieldStyle(.roundedBorder)
-            Button("Bağlantı oluştur") {
+            Button("app.createLink") {
                 guard let url = URL(string: sourceURL),
                       var components = URLComponents(string: "https://YOUR_DOMAIN_HERE/s") else { return }
                 components.queryItems = [URLQueryItem(name: "url", value: url.absoluteString)]
@@ -32,7 +32,7 @@ struct ContentView: View {
             }
             .buttonStyle(.borderedProminent)
             Spacer()
-            Text("Apple Music'te Paylaş → TuneBridge seçeneğini de kullanabilirsin.")
+            Text("app.shareHint")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }

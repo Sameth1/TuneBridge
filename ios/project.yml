@@ -1,6 +1,9 @@
 name: TuneBridge
 options:
   bundleIdPrefix: com.tunebridge
+  # English is the base language; Turkish comes from the tr.lproj folders.
+  # iOS picks the device language and adds Settings → TuneBridge → Language for switching.
+  developmentLanguage: en
 settings:
   base:
     SWIFT_VERSION: 5.9
@@ -14,6 +17,7 @@ targets:
       path: App/Info.plist
       properties:
         CFBundleDisplayName: TuneBridge
+        CFBundleDevelopmentRegion: en
         UILaunchScreen: {}
     settings:
       base:
@@ -29,6 +33,7 @@ targets:
       path: ShareExtension/Info.plist
       properties:
         CFBundleDisplayName: TuneBridge
+        CFBundleDevelopmentRegion: en
         ShareBaseURL: https://YOUR_DOMAIN_HERE
         NSExtension:
           NSExtensionPointIdentifier: com.apple.share-services

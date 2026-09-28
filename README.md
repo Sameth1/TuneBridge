@@ -24,9 +24,10 @@ A Spotify recipient should not have to transcribe an Apple Music song title and 
 
 | Platform | Accepted as input | Direct destination link when verified |
 | --- | --- | --- |
-| Apple Music | Yes | Odesli, MusicBrainz relationship, or Apple catalog match |
+| Apple Music | Yes | Odesli, MusicBrainz relationship, Apple Music API ISRC lookup (optional), or Apple catalog match |
 | Spotify | Yes | Odesli, MusicBrainz relationship, or optional Spotify API lookup (ISRC first) |
-| YouTube Music | Yes | Odesli, MusicBrainz relationship, YouTube Music "Songs" search, or an official (Topic / verified artist) YouTube upload |
+| YouTube Music | Yes | Odesli, MusicBrainz relationship, YouTube Music "Songs" search, or the song's auto-generated Topic upload |
+| YouTube | Yes | Odesli, MusicBrainz relationship, the artist's official (verified-channel) music video, or the Topic upload |
 | Deezer | Yes | Odesli, Deezer ISRC lookup, Deezer catalog match, or MusicBrainz relationship |
 | SoundCloud | Yes | Odesli, SoundCloud search match (ISRC preferred), or MusicBrainz relationship |
 
@@ -76,6 +77,7 @@ All variables are server-side environment variables. Never put Spotify credentia
 | `SPOTIFY_CLIENT_ID` | No | Enables Spotify Web API track lookup and search when paired with the secret. |
 | `SPOTIFY_CLIENT_SECRET` | No | Server-only Spotify client secret. |
 | `ODESLI_API_KEY` | No | Odesli API key. Odesli's keyless public API has been retired, so Odesli is skipped without a key. |
+| `APPLE_MUSIC_TEAM_ID`, `APPLE_MUSIC_KEY_ID`, `APPLE_MUSIC_PRIVATE_KEY` | No | Apple Music API (MusicKit key from a paid Apple Developer Program membership). Enables exact ISRC lookups and avoids the iTunes Search API's ~20 requests/minute limit. The private key is the `.p8` file contents; `\n` escapes are accepted. |
 | `SOUNDCLOUD_CLIENT_ID` | No | Fixed SoundCloud api-v2 client ID; otherwise it is read from SoundCloud's web player. |
 
 For a local PowerShell session, for example:
@@ -146,3 +148,11 @@ ios/                iOS app and Share Extension scaffold
 - [Deezer API](https://developers.deezer.com/api)
 
 TuneBridge is an independent project and is not affiliated with the music platforms above.
+
+## Localization
+
+The web UI is English by default with a Turkish switch; strings live in `public/i18n.js`. The iOS app and Share Extension use `en.lproj` (development language) and `tr.lproj` `Localizable.strings`; iOS follows the device language and offers Settings → TuneBridge → Language.
+
+## Credits
+
+Platform icons are from [Simple Icons](https://simpleicons.org) (CC0). The brand marks themselves belong to their owners and are used only to label links to their services.

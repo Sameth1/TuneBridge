@@ -109,7 +109,10 @@ function render(data, shareUrl) {
     const mark = document.createElement('span');
     mark.className = 'platform-mark';
     mark.style.background = platform.color;
-    mark.textContent = platform.mark;
+    const logo = document.createElement('img');
+    logo.src = platform.icon;
+    logo.alt = '';
+    mark.append(logo);
     const details = document.createElement('span');
     details.className = 'platform-details';
     const name = document.createElement('span');

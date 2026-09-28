@@ -28,5 +28,6 @@ test('does not confuse a live recording with the studio version', () => {
 
 test('search links preserve non-Latin song names', () => {
   const links = searchLinks('أغنية', 'فنان');
-  assert.equal(new URL(links.youtube).searchParams.get('q'), 'أغنية فنان');
+  assert.equal(new URL(links.youtubeMusic).searchParams.get('q'), 'أغنية فنان');
+  assert.equal(new URL(links.youtube).searchParams.get('search_query'), 'أغنية فنان');
 });
