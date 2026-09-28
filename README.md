@@ -2,7 +2,7 @@
 
 **Share a song once. Let friends open it in the music app they use.**
 
-TuneBridge turns a track URL from Apple Music, Spotify, YouTube Music, Deezer, or SoundCloud into one shareable page. The recipient chooses a service. When TuneBridge can identify the same recording with sufficient confidence, the button points to the **track itself**; otherwise it is clearly labeled as a search link. The interface is currently in Turkish.
+TuneBridge turns a track URL from Apple Music, Spotify, YouTube Music, Deezer, or SoundCloud into one shareable page. The recipient chooses a service. When TuneBridge can identify the same recording with sufficient confidence, the button points to the **track itself**; otherwise it is clearly labeled as a search link. The interface is in English by default, with a Turkish option in the header; the choice is remembered in the browser.
 
 > **Status:** Working web MVP and an iOS Share Extension source scaffold. The iOS project has not been built or tested on a device. This repository does not include a hosted deployment; `localhost` share links work only on the computer running the server.
 
@@ -26,7 +26,7 @@ A Spotify recipient should not have to transcribe an Apple Music song title and 
 | --- | --- | --- |
 | Apple Music | Yes | Odesli, MusicBrainz relationship, or Apple catalog match |
 | Spotify | Yes | Odesli, MusicBrainz relationship, or optional Spotify API lookup (ISRC first) |
-| YouTube Music | Yes | Odesli, MusicBrainz relationship, or YouTube Music "Songs" search match |
+| YouTube Music | Yes | Odesli, MusicBrainz relationship, YouTube Music "Songs" search, or an official (Topic / verified artist) YouTube upload |
 | Deezer | Yes | Odesli, Deezer ISRC lookup, Deezer catalog match, or MusicBrainz relationship |
 | SoundCloud | Yes | Odesli, SoundCloud search match (ISRC preferred), or MusicBrainz relationship |
 
@@ -36,14 +36,14 @@ Catalog coverage varies by track and country. A search button is a deliberate re
 
 1. **Parse and validate the input.** `lib.js` accepts known music domains and track URL formats; short share links are expanded by following their redirects. Album and playlist links are outside this MVP's scope.
 2. **Fetch source metadata.** Apple and Deezer provide catalog metadata. Spotify uses its Web API when credentials are configured, otherwise the public embed page (title, artists, duration). YouTube uses the watch page: auto-generated "Topic" uploads carry title, artist and album in their description; for music videos, "Artist - Title" is split and the video length is treated as unreliable. SoundCloud uses the track page data, including the label-supplied artist and ISRC when present. oEmbed is the fallback everywhere.
-3. **Collect verified cross-platform links.** [Odesli](https://odesli.co) (song.link) is queried for every input, and MusicBrainz for Spotify inputs. Every Odesli result must agree with the source on title/version and artist before it is used.
+3. **Collect verified cross-platform links.** MusicBrainz is consulted for Spotify inputs, and [Odesli](https://odesli.co) (song.link) for every input when `ODESLI_API_KEY` is set. Every Odesli result must agree with the source on title/version and artist before it is used.
 4. **Recover missing metadata from artwork.** If the source still has only a title and cover, TuneBridge compares the cover with Apple catalog candidates for that title and accepts a nearly identical, unambiguous candidate.
-5. **Search the remaining catalogs.** Apple, Deezer, YouTube Music (songs only), SoundCloud and, with credentials, Spotify are searched. A candidate must agree on track title/version and artist, plus a close duration (≤ 6 s) or matching ISRC. Live, remix, acoustic, cover and other version labels are checked to reduce false matches. When the ISRC is known, Deezer and Spotify are looked up by ISRC directly. For a music-video source, a title and artist match is accepted only when every such catalog result is the same recording.
+5. **Search the remaining catalogs.** Apple, Deezer, YouTube Music (songs only, falling back to YouTube uploads from Topic and verified-artist channels), SoundCloud and, with credentials, Spotify are searched. A candidate must agree on track title/version and artist, plus a close duration (≤ 6 s) or matching ISRC. Live, remix, acoustic, cover and other version labels are checked to reduce false matches. When the ISRC is known, Deezer and Spotify are looked up by ISRC directly. For a music-video source, a title and artist match is accepted only when every such catalog result is the same recording.
 6. **Label the result.** Verified URLs are shown as **“Şarkıyı doğrudan aç”** (open track directly): they open the track's own page, and the listener presses play. Platforms where the song could not be verified show **“Platformda ara”** (search on platform).
 
 This is a conservative matching system, not an audio fingerprinting service. Catalog records can be incomplete, and two releases can share metadata or artwork. The app does not stream music or start playback through a service API; opening a direct link hands control to that platform. YouTube Music has no separate song page, so its direct link is a watch URL, and the YouTube Music app may start playing it on open.
 
-YouTube Music search, the YouTube watch page and SoundCloud search are unofficial public web endpoints; if they change, those platforms fall back to search links until the parser is updated.
+YouTube Music search, YouTube's player and search endpoints and SoundCloud search are unofficial public web endpoints; if they change, those platforms fall back to search links until the parser is updated.
 
 ## Quick start
 
@@ -75,7 +75,7 @@ All variables are server-side environment variables. Never put Spotify credentia
 | `MUSICBRAINZ_CONTACT` | Recommended for public hosting | Reachable contact URL or email in the MusicBrainz user agent. |
 | `SPOTIFY_CLIENT_ID` | No | Enables Spotify Web API track lookup and search when paired with the secret. |
 | `SPOTIFY_CLIENT_SECRET` | No | Server-only Spotify client secret. |
-| `ODESLI_API_KEY` | Recommended for public hosting | Odesli API key; without it the public API allows about 10 lookups per minute. |
+| `ODESLI_API_KEY` | No | Odesli API key. Odesli's keyless public API has been retired, so Odesli is skipped without a key. |
 | `SOUNDCLOUD_CLIENT_ID` | No | Fixed SoundCloud api-v2 client ID; otherwise it is read from SoundCloud's web player. |
 
 For a local PowerShell session, for example:

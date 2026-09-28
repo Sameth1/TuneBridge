@@ -1,40 +1,79 @@
+import { LANGUAGES, STRINGS } from './i18n.js';
+
 const form = document.querySelector('#link-form');
 const input = document.querySelector('#music-url');
 const errorBox = document.querySelector('#form-error');
 const result = document.querySelector('#result');
 const submitButton = document.querySelector('#submit-button');
+const LANGUAGE_KEY = 'tunebridge-language';
 
-function showError(message) { errorBox.textContent = message; errorBox.hidden = false; }
-function hideError() { errorBox.hidden = true; errorBox.textContent = ''; }
+let language = 'en';
+let lastResult = null;
+let lastError = null;
+
+function storedLanguage() {
+  try { return localStorage.getItem(LANGUAGE_KEY); } catch { return null; }
+}
+
+const t = key => STRINGS[language][key];
+
+function applyLanguage(next) {
+  language = LANGUAGES.includes(next) ? next : 'en';
+  try { localStorage.setItem(LANGUAGE_KEY, language); } catch { /* Private mode: keep the choice for this visit only. */ }
+  document.documentElement.lang = language;
+  document.querySelector('meta[name="description"]').content = t('metaDescription');
+  for (const element of document.querySelectorAll('[data-i18n]')) element.textContent = t(element.dataset.i18n);
+  // Only our own dictionary strings are written as HTML.
+  for (const element of document.querySelectorAll('[data-i18n-html]')) element.innerHTML = t(element.dataset.i18nHtml);
+  for (const element of document.querySelectorAll('[data-i18n-aria]')) element.setAttribute('aria-label', t(element.dataset.i18nAria));
+  for (const button of document.querySelectorAll('[data-lang]')) button.setAttribute('aria-pressed', String(button.dataset.lang === language));
+  if (submitButton.disabled) submitButton.textContent = t('submitting');
+  if (lastResult) render(lastResult.data, lastResult.shareUrl);
+  else document.title = t('pageTitle');
+  if (lastError) showError(lastError);
+}
+
+function errorMessage(error) {
+  return STRINGS[language].errors[error.code] || error.message || t('genericError');
+}
+
+function showError(error) {
+  lastError = error;
+  errorBox.textContent = typeof error === 'string' ? t(error) : errorMessage(error);
+  errorBox.hidden = false;
+}
+function hideError() { lastError = null; errorBox.hidden = true; errorBox.textContent = ''; }
 
 async function loadSong(sourceUrl, updateHistory = true) {
   hideError();
   submitButton.disabled = true;
-  submitButton.textContent = 'Şarkı aranıyor…';
+  submitButton.textContent = t('submitting');
   try {
     const localeCountry = navigator.language.match(/[-_]([A-Za-z]{2})$/)?.[1]?.toLowerCase() || 'us';
     const response = await fetch(`/api/resolve?url=${encodeURIComponent(sourceUrl)}&country=${localeCountry}`);
     const data = await response.json();
-    if (!response.ok) throw new Error(data.error || 'Şarkı bulunamadı.');
+    if (!response.ok) throw Object.assign(new Error(data.error || ''), { code: data.code || 'resolve_failed' });
     const shareUrl = new URL(`/s?url=${encodeURIComponent(sourceUrl)}`, location.origin).href;
     if (updateHistory) history.pushState({}, '', shareUrl);
     input.value = sourceUrl;
+    lastResult = { data, shareUrl };
     render(data, shareUrl);
     result.hidden = false;
     result.scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (error) {
     result.hidden = true;
-    showError(error.message || 'Bir hata oluştu.');
+    lastResult = null;
+    showError({ code: error.code, message: error.message });
   } finally {
     submitButton.disabled = false;
-    submitButton.innerHTML = 'Bağlantı oluştur <span>→</span>';
+    submitButton.innerHTML = t('submit');
   }
 }
 
 function render(data, shareUrl) {
   document.title = `${data.song.title} — TuneBridge`;
   document.querySelector('#song-title').textContent = data.song.title;
-  document.querySelector('#song-artist').textContent = data.song.artist || 'Sanatçı bilgisi doğrulanamadı';
+  document.querySelector('#song-artist').textContent = data.song.artist || t('unknownArtist');
   const album = data.song.album || '';
   document.querySelector('#song-album').textContent = album;
   const seconds = data.song.duration ? Math.round(data.song.duration / 1000) : 0;
@@ -44,17 +83,17 @@ function render(data, shareUrl) {
   if (data.song.artwork) {
     const img = document.createElement('img');
     img.src = data.song.artwork;
-    img.alt = `${data.song.title} kapak görseli`;
+    img.alt = t('artworkAlt')(data.song.title);
     artwork.append(img);
   } else artwork.textContent = '♫';
   document.querySelector('#share-url').textContent = shareUrl;
-  document.querySelector('#copy-button').onclick = async () => {
+  const copyButton = document.querySelector('#copy-button');
+  copyButton.onclick = async () => {
     try {
       await navigator.clipboard.writeText(shareUrl);
-      const button = document.querySelector('#copy-button');
-      button.textContent = 'Kopyalandı ✓';
-      setTimeout(() => button.textContent = 'Bağlantıyı kopyala', 2200);
-    } catch { showError('Kopyalama başarısız. Bağlantıyı seçip elle kopyalayabilirsin.'); }
+      copyButton.textContent = t('copied');
+      setTimeout(() => copyButton.textContent = t('copy'), 2200);
+    } catch { showError('copyFailed'); }
   };
   const nativeShare = document.querySelector('#native-share-button');
   nativeShare.hidden = !navigator.share;
@@ -78,7 +117,7 @@ function render(data, shareUrl) {
     name.textContent = platform.name;
     const state = document.createElement('span');
     state.className = 'platform-state';
-    state.textContent = platform.exact ? 'Şarkıyı doğrudan aç' : 'Platformda ara';
+    state.textContent = platform.exact ? t('openDirect') : t('searchPlatform');
     details.append(name, state);
     const arrow = document.createElement('span');
     arrow.className = 'platform-arrow';
@@ -88,6 +127,8 @@ function render(data, shareUrl) {
   }
 }
 
+for (const button of document.querySelectorAll('[data-lang]')) button.addEventListener('click', () => applyLanguage(button.dataset.lang));
+applyLanguage(storedLanguage() || 'en');
 form.addEventListener('submit', event => { event.preventDefault(); loadSong(input.value.trim()); });
 const shared = new URLSearchParams(location.search).get('url');
 if (shared) loadSong(shared, false);

@@ -1,9 +1,9 @@
-import { PLATFORMS, parseMusicUrl, isShortMusicLink, confidentMatch, selectUniqueTitleArtist, searchLinks, normalize, sameTrackTitle, artistsOverlap, cleanTrackUrl } from './lib.js';
+import { UserError, PLATFORMS, parseMusicUrl, isShortMusicLink, confidentMatch, selectUniqueTitleArtist, searchLinks, normalize, sameTrackTitle, artistsOverlap, cleanTrackUrl } from './lib.js';
 import { fetchJson, followRedirects } from './http.js';
 import { lookupSpotifyRecording, lookupIsrcRecording } from './musicbrainz.js';
 import { artworkSignature, artworkSimilarity, selectArtworkCandidate } from './artwork.js';
 import { spotifyMetadata, searchSpotify } from './spotify.js';
-import { youtubeMetadata, searchYoutubeMusic } from './youtube.js';
+import { youtubeMetadata, searchYoutubeMusic, searchYoutubeVideos } from './youtube.js';
 import { soundcloudMetadata, searchSoundcloud } from './soundcloud.js';
 import { fetchOdesli, odesliLinks } from './odesli.js';
 
@@ -13,12 +13,12 @@ async function sourceMetadata(input) {
       const country = new URL(input.url).pathname.split('/').filter(Boolean)[0] || 'us';
       const data = await fetchJson(`https://itunes.apple.com/lookup?id=${input.id}&country=${encodeURIComponent(country)}&entity=song`);
       const track = data.results?.find(x => x.wrapperType === 'track' && String(x.trackId) === input.id);
-      if (!track) throw new Error('Apple Music kataloğunda bu şarkı bulunamadı.');
+      if (!track) throw new UserError('apple_not_found', 'This song was not found in the Apple Music catalog.');
       return { title: track.trackName, artist: track.artistName, album: track.collectionName, artwork: track.artworkUrl100?.replace('100x100bb', '600x600bb'), duration: track.trackTimeMillis, isrc: null };
     }
     case 'deezer': {
       const track = await fetchJson(`https://api.deezer.com/track/${input.id}`);
-      if (!track.title || track.error) throw new Error('Deezer kataloğunda bu şarkı bulunamadı.');
+      if (!track.title || track.error) throw new UserError('deezer_not_found', 'This song was not found in the Deezer catalog.');
       return deezerSong(track);
     }
     case 'spotify': return spotifyMetadata(input);
@@ -50,9 +50,18 @@ function pickCandidate(song, candidates) {
   return song.durationReliable === false || !song.duration ? selectUniqueTitleArtist(song, candidates.filter(c => c.url)) : null;
 }
 
+// iTunes Search allows roughly 20 requests a minute per IP and answers 403 beyond that, so reuse recent answers.
+const appleCache = new Map();
+
 async function appleSearch(term, country, limit = 20) {
-  const data = await fetchJson(`https://itunes.apple.com/search?term=${encodeURIComponent(term)}&country=${country}&media=music&entity=song&limit=${limit}`);
-  return (data.results || []).filter(track => track.wrapperType === 'track');
+  const url = `https://itunes.apple.com/search?term=${encodeURIComponent(term)}&country=${country}&media=music&entity=song&limit=${limit}`;
+  const cached = appleCache.get(url);
+  if (cached && cached.until > Date.now()) return cached.results;
+  const data = await fetchJson(url);
+  const results = (data.results || []).filter(track => track.wrapperType === 'track');
+  if (appleCache.size >= 500) appleCache.delete(appleCache.keys().next().value);
+  appleCache.set(url, { results, until: Date.now() + 60 * 60 * 1000 });
+  return results;
 }
 
 async function findApple(song, country) {
@@ -98,7 +107,22 @@ async function findDeezer(song) {
 }
 
 const findSpotify = async song => pickCandidate(song, await searchSpotify(song));
-const findYoutube = async (song, country) => pickCandidate(song, await searchYoutubeMusic(query(song), country));
+// YouTube Music's song search first; official channel uploads when it returns nothing.
+async function findYoutube(song, country) {
+  const fromMusic = pickCandidate(song, await searchYoutubeMusic(query(song), country).catch(() => []));
+  if (fromMusic) return fromMusic;
+  const videos = await searchYoutubeVideos(query(song), country);
+  return pickCandidate(song, videos) || closestOfficialVideo(song, videos);
+}
+
+// An official music video of the same song can run longer than the track (intro, outro), so allow up to 90 s.
+function closestOfficialVideo(song, videos) {
+  if (!song.duration) return null;
+  return videos
+    .filter(video => sameTrackTitle(song.title, video.title) && artistsOverlap(song.artist, video.artist) && video.duration &&
+      Math.abs(video.duration - song.duration) <= 90_000)
+    .sort((a, b) => Math.abs(a.duration - song.duration) - Math.abs(b.duration - song.duration))[0] || null;
+}
 const findSoundcloud = async song => pickCandidate(song, await searchSoundcloud(query(song)));
 
 const acceptsTrackUrl = url => { try { parseMusicUrl(url); return true; } catch { return false; } };
@@ -144,6 +168,8 @@ export async function resolveMusicUrl(rawUrl, country = 'us') {
     const reference = found.apple || found.deezer || found.spotify;
     if (reference) {
       song.album ||= reference.album;
+      // A video title is a guess ("Artist - Title (Official Video)"); the catalog title is the real one.
+      if (!song.durationReliable && reference.title) song.title = reference.title;
       if (!song.duration || !song.durationReliable) Object.assign(song, { duration: reference.duration || song.duration, durationReliable: true });
     }
     song.isrc ||= found.deezer?.isrc || found.spotify?.isrc || found.soundcloud?.isrc || null;

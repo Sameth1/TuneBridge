@@ -1,3 +1,5 @@
+import { UserError } from './lib.js';
+
 const USER_AGENT = 'Mozilla/5.0 (compatible; TuneBridge/0.2; music link resolver)';
 
 async function request(url, options = {}) {
@@ -31,7 +33,7 @@ export async function followRedirects(url, accept, hops = 4) {
     } finally { clearTimeout(timer); }
   }
   if (accept(current)) return current;
-  throw new Error('Kısa bağlantı bir şarkıya çözümlenemedi.');
+  throw new UserError('short_link_failed', 'This short link does not lead to a song.');
 }
 
 // Extracts a JSON object literal that starts right after `marker` in an HTML page.

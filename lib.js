@@ -19,41 +19,46 @@ export function isShortMusicLink(input) {
   } catch { return false; }
 }
 
+// User-facing errors carry a stable code so the browser can show them in the visitor's language.
+export class UserError extends Error {
+  constructor(code, message) { super(message); this.code = code; }
+}
+
 export function parseMusicUrl(input) {
   let url;
-  try { url = new URL(String(input).trim()); } catch { throw new Error('Geçerli bir müzik bağlantısı gir.'); }
-  if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new Error('Bağlantı http veya https olmalı.');
+  try { url = new URL(String(input).trim()); } catch { throw new UserError('invalid_url', 'Enter a valid music link.'); }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') throw new UserError('bad_protocol', 'The link must start with http or https.');
   const host = url.hostname.toLowerCase();
   const parts = url.pathname.split('/').filter(Boolean);
   if (host === 'music.apple.com' || host === 'geo.music.apple.com') {
     const id = url.searchParams.get('i') || (parts.includes('song') ? parts.at(-1) : null);
-    if (!/^\d+$/.test(id || '')) throw new Error('Apple Music şarkı bağlantısı gerekli; albüm bağlantısı desteklenmiyor.');
+    if (!/^\d+$/.test(id || '')) throw new UserError('apple_track_required', 'An Apple Music song link is required; album links are not supported.');
     return { platform: 'apple', id, url: url.href };
   }
   if (host === 'open.spotify.com' || host === 'spotify.com' || host === 'www.spotify.com') {
     const i = parts.indexOf('track');
     const id = i >= 0 ? parts[i + 1] : null;
-    if (!/^[A-Za-z0-9]{22}$/.test(id || '')) throw new Error('Spotify şarkı bağlantısı gerekli.');
+    if (!/^[A-Za-z0-9]{22}$/.test(id || '')) throw new UserError('spotify_track_required', 'A Spotify track link is required.');
     return { platform: 'spotify', id, url: `https://open.spotify.com/track/${id}` };
   }
   if (YOUTUBE_HOSTS.includes(host)) {
     const id = host === 'youtu.be' ? parts[0]
       : parts[0] === 'watch' ? url.searchParams.get('v')
       : ['shorts', 'embed', 'live'].includes(parts[0]) ? parts[1] : null;
-    if (!/^[\w-]{11}$/.test(id || '')) throw new Error('YouTube Music şarkı bağlantısı gerekli.');
+    if (!/^[\w-]{11}$/.test(id || '')) throw new UserError('youtube_track_required', 'A YouTube or YouTube Music song link is required.');
     return { platform: 'youtube', id, url: `https://music.youtube.com/watch?v=${id}` };
   }
   if (host === 'www.deezer.com' || host === 'deezer.com') {
     const i = parts.indexOf('track');
     const id = i >= 0 ? parts[i + 1] : null;
-    if (!/^\d+$/.test(id || '')) throw new Error('Deezer şarkı bağlantısı gerekli.');
+    if (!/^\d+$/.test(id || '')) throw new UserError('deezer_track_required', 'A Deezer track link is required.');
     return { platform: 'deezer', id, url: `https://www.deezer.com/track/${id}` };
   }
   if (host === 'soundcloud.com' || host === 'www.soundcloud.com' || host === 'm.soundcloud.com') {
-    if (parts.length < 2 || SOUNDCLOUD_RESERVED.includes(parts[0]) || SOUNDCLOUD_USER_PAGES.includes(parts[1])) throw new Error('SoundCloud parça bağlantısı gerekli.');
+    if (parts.length < 2 || SOUNDCLOUD_RESERVED.includes(parts[0]) || SOUNDCLOUD_USER_PAGES.includes(parts[1])) throw new UserError('soundcloud_track_required', 'A SoundCloud track link is required.');
     return { platform: 'soundcloud', id: parts.join('/'), url: `https://soundcloud.com/${parts.join('/')}` };
   }
-  throw new Error('Şimdilik Apple Music, Spotify, YouTube Music, Deezer ve SoundCloud bağlantıları destekleniyor.');
+  throw new UserError('unsupported_platform', 'Apple Music, Spotify, YouTube Music, Deezer and SoundCloud links are supported.');
 }
 
 const SUFFIX_WORDS = 'remaster|remastered|live|edit|version|versiyon|mix|remix|feat|ft|with|acoustic|akustik|mono|stereo|from|bonus|demo|instrumental|single|radio|canlı|sped up|slowed';
@@ -81,7 +86,10 @@ function versionTags(value) {
     cover: ['cover'],
     remaster: ['remaster', 'remastered'],
     mono: ['mono'],
-    stereo: ['stereo']
+    stereo: ['stereo'],
+    edit: ['edit'],
+    extended: ['extended'],
+    rework: ['remake', 'rework', 'bootleg', 'flip', 'mashup', 'nightcore', '8d']
   };
   return Object.entries(groups).filter(([, words]) => words.some(word =>
     new RegExp(`(?<![\\p{L}\\p{N}])${word}(?![\\p{L}\\p{N}])`, 'u').test(title)

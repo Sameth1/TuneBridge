@@ -1,9 +1,16 @@
 import { fetchJson, fetchText, extractJsonAfter, findAllDeep } from './http.js';
-import { cleanChannelName, splitArtistTitle } from './lib.js';
+import { cleanChannelName, splitArtistTitle, artistsOverlap } from './lib.js';
 
 // Consent cookies keep EU visitors from being redirected to consent.youtube.com.
 const PAGE_HEADERS = { 'Accept-Language': 'en-US,en;q=0.9', Cookie: 'SOCS=CAI; CONSENT=YES+1' };
 const MUSIC_CLIENT = { clientName: 'WEB_REMIX', clientVersion: '1.20250101.01.00', hl: 'en' };
+const WEB_CLIENT = { clientName: 'WEB', clientVersion: '2.20250101.00.00', hl: 'en' };
+const VIDEO_LABEL = /\s*[([](?:official\s+)?(?:(?:music|lyric)\s+)?(?:video|audio|visuali[sz]er|clip)(?:\s+(?:oficial|officiel|resmi))?[)\]]|\s*[([](?:lyrics?|official|hd|hq|4k|m\/?v|klip|video\s*klip)[)\]]/gi;
+
+// "Blinding Lights (Official Audio)" → "Blinding Lights"; version labels such as "(Live)" stay.
+export function cleanVideoTitle(title) {
+  return String(title || '').replace(VIDEO_LABEL, '').trim();
+}
 // ytmusicapi's "songs" filter: only official audio tracks, not videos or user uploads.
 const SONGS_FILTER = 'EgWKAQIIAWoMEA4QChADEAQQCRAF';
 
@@ -35,13 +42,26 @@ export function youtubeSongFromPlayer(player) {
   // Its length often includes intros, so matching must not rely on duration.
   const split = splitArtistTitle(details.title);
   return {
-    title: split?.title || details.title,
+    title: cleanVideoTitle(split?.title || details.title),
     artist: split?.artist || cleanChannelName(details.author),
     album: '', duration, artwork, durationReliable: false
   };
 }
 
+// The innertube player endpoint answers where the watch page shows a consent or bot-check page.
+async function youtubePlayer(id) {
+  return fetchJson('https://www.youtube.com/youtubei/v1/player?prettyPrint=false', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...PAGE_HEADERS },
+    body: JSON.stringify({ context: { client: WEB_CLIENT }, videoId: id })
+  });
+}
+
 export async function youtubeMetadata(id) {
+  try {
+    const song = youtubeSongFromPlayer(await youtubePlayer(id));
+    if (song) return song;
+  } catch { /* Try the watch page next. */ }
   try {
     const html = await fetchText(`https://www.youtube.com/watch?v=${id}&hl=en`, { headers: PAGE_HEADERS });
     const song = youtubeSongFromPlayer(extractJsonAfter(html, 'ytInitialPlayerResponse = '));
@@ -51,7 +71,7 @@ export async function youtubeMetadata(id) {
   const topic = /\s-\sTopic$/i.test(data.author_name || '');
   const split = topic ? null : splitArtistTitle(data.title);
   return {
-    title: split?.title || data.title,
+    title: cleanVideoTitle(split?.title || data.title),
     artist: split?.artist || cleanChannelName(data.author_name),
     album: '', duration: null, artwork: data.thumbnail_url, durationReliable: false
   };
@@ -95,4 +115,35 @@ export async function searchYoutubeMusic(query, country = 'us') {
     body: JSON.stringify({ context: { client: { ...MUSIC_CLIENT, gl: country.toUpperCase() } }, query, params: SONGS_FILTER })
   });
   return parseMusicSearch(response);
+}
+
+// Regular YouTube search, limited to uploads that can be trusted as the artist's own:
+// auto-generated "Topic" channels (the YouTube Music song itself) and verified artist channels.
+export function parseVideoSearch(response) {
+  return findAllDeep(response, 'videoRenderer').map(video => {
+    const channel = (video.ownerText?.runs || []).map(run => run.text).join('');
+    const topic = /\s-\sTopic$/i.test(channel);
+    const verified = (video.ownerBadges || []).some(badge => badge.metadataBadgeRenderer?.style === 'BADGE_STYLE_TYPE_VERIFIED_ARTIST');
+    if (!/^[\w-]{11}$/.test(video.videoId || '') || !(topic || verified)) return null;
+    const artist = cleanChannelName(channel);
+    const rawTitle = (video.title?.runs || []).map(run => run.text).join('');
+    const split = splitArtistTitle(rawTitle);
+    return {
+      title: cleanVideoTitle(split && artistsOverlap(artist, split.artist) ? split.title : rawTitle),
+      artist,
+      duration: parseDuration(video.lengthText?.simpleText),
+      isrc: null,
+      topic,
+      url: `https://music.youtube.com/watch?v=${video.videoId}`
+    };
+  }).filter(Boolean);
+}
+
+export async function searchYoutubeVideos(query, country = 'us') {
+  const response = await fetchJson('https://www.youtube.com/youtubei/v1/search?prettyPrint=false', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...PAGE_HEADERS },
+    body: JSON.stringify({ context: { client: { ...WEB_CLIENT, gl: country.toUpperCase() } }, query })
+  });
+  return parseVideoSearch(response);
 }

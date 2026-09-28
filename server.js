@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveMusicUrl } from './resolve.js';
-import { parseMusicUrl, isShortMusicLink } from './lib.js';
+import { parseMusicUrl, isShortMusicLink, UserError } from './lib.js';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
 const port = Number(process.env.PORT || 3000);
@@ -36,9 +36,9 @@ const server = http.createServer(async (req, res) => {
       const source = url.searchParams.get('url') || '';
       const requestedCountry = url.searchParams.get('country') || 'us';
       const country = /^[a-z]{2}$/i.test(requestedCountry) ? requestedCountry.toLowerCase() : 'us';
-      if (source.length > 1500) return respond(res, 400, { error: 'Bağlantı çok uzun.' });
+      if (source.length > 1500) return respond(res, 400, { code: 'url_too_long', error: 'The link is too long.' });
       try { return respond(res, 200, await cachedResolve(source, country)); }
-      catch (error) { return respond(res, 400, { error: error.message || 'Şarkı çözümlenemedi.' }); }
+      catch (error) { return respond(res, 400, errorBody(error)); }
     }
     if (url.pathname === '/api/check') {
       try {
@@ -46,7 +46,7 @@ const server = http.createServer(async (req, res) => {
         if (!isShortMusicLink(source)) parseMusicUrl(source);
         return respond(res, 200, { valid: true });
       }
-      catch (error) { return respond(res, 400, { error: error.message }); }
+      catch (error) { return respond(res, 400, errorBody(error)); }
     }
     const file = url.pathname === '/' || url.pathname === '/s' ? '/index.html' : url.pathname;
     const filename = path.resolve(root, `.${file}`);
@@ -56,7 +56,7 @@ const server = http.createServer(async (req, res) => {
       try {
         const data = await cachedResolve(url.searchParams.get('url'));
         const title = escapeHTML(`${data.song.title} — TuneBridge`);
-        const description = escapeHTML(`${data.song.artist || 'Şarkı'} · Kendi müzik uygulamanda aç`);
+        const description = escapeHTML(`${data.song.artist || 'Song'} · Open it in your own music app`);
         const image = data.song.artwork ? `<meta property="og:image" content="${escapeHTML(data.song.artwork)}">` : '';
         const publicBase = process.env.PUBLIC_BASE_URL || base;
         const canonical = escapeHTML(new URL(url.pathname + url.search, publicBase).href);
@@ -68,9 +68,14 @@ const server = http.createServer(async (req, res) => {
     res.end(content);
   } catch (error) {
     if (error.code === 'ENOENT') return respond(res, 404, { error: 'Not found' });
-    respond(res, 500, { error: 'Sunucu hatası.' });
+    respond(res, 500, { code: 'server_error', error: 'Server error.' });
   }
 });
+
+// Catalog and network failures are not shown verbatim; the browser gets a generic, translatable code.
+function errorBody(error) {
+  return error instanceof UserError ? { code: error.code, error: error.message } : { code: 'resolve_failed', error: 'The song could not be resolved.' };
+}
 
 function respond(res, status, data) {
   res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });

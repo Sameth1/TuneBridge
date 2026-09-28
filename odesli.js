@@ -32,8 +32,9 @@ export function odesliLinks(data, song) {
   return { links, artist: reference.artist };
 }
 
-// Without ODESLI_API_KEY the public API allows about 10 requests a minute; the server caches results.
-export function fetchOdesli(sourceUrl, country = 'us') {
-  const key = process.env.ODESLI_API_KEY ? `&key=${encodeURIComponent(process.env.ODESLI_API_KEY)}` : '';
-  return fetchJson(`https://api.song.link/v1-alpha.1/links?url=${encodeURIComponent(sourceUrl)}&userCountry=${country.toUpperCase()}&songIfSingle=true${key}`, { timeout: 9000 });
+// Odesli retired its keyless public API (401 PUBLIC_API_ACCESS_DEPRECATED), so it is only used with a key.
+export async function fetchOdesli(sourceUrl, country = 'us') {
+  const key = process.env.ODESLI_API_KEY;
+  if (!key) return null;
+  return fetchJson(`https://api.song.link/v1-alpha.1/links?url=${encodeURIComponent(sourceUrl)}&userCountry=${country.toUpperCase()}&songIfSingle=true&key=${encodeURIComponent(key)}`, { timeout: 9000 });
 }
