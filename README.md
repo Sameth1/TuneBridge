@@ -12,7 +12,7 @@ A Spotify recipient should not have to transcribe an Apple Music song title and 
 
 ## Features
 
-- Accepts **individual track links** from Apple Music, Spotify, YouTube Music, Deezer, and SoundCloud.
+- Accepts **individual track links** from Apple Music, Spotify, YouTube / YouTube Music (including `youtu.be`), Deezer, and SoundCloud, plus app short links (`on.soundcloud.com`, `spotify.link`, `link.deezer.com`).
 - Resolves track title, artist, cover art, album, duration, and ISRC when the sources provide them.
 - Shows direct track links only for matches supported by recording relationships or strict metadata comparison.
 - Falls back to a clearly marked platform search when a direct match is uncertain or unavailable.
@@ -24,24 +24,26 @@ A Spotify recipient should not have to transcribe an Apple Music song title and 
 
 | Platform | Accepted as input | Direct destination link when verified |
 | --- | --- | --- |
-| Apple Music | Yes | MusicBrainz relationship or Apple catalog match |
-| Spotify | Yes | Original Spotify URL, MusicBrainz relationship, or optional Spotify API lookup |
-| YouTube Music | Yes | Original YouTube Music URL or MusicBrainz recording relationship |
-| Deezer | Yes | Deezer catalog match or MusicBrainz relationship |
-| SoundCloud | Yes | Original SoundCloud URL or MusicBrainz recording relationship |
+| Apple Music | Yes | Odesli, MusicBrainz relationship, or Apple catalog match |
+| Spotify | Yes | Odesli, MusicBrainz relationship, or optional Spotify API lookup (ISRC first) |
+| YouTube Music | Yes | Odesli, MusicBrainz relationship, or YouTube Music "Songs" search match |
+| Deezer | Yes | Odesli, Deezer ISRC lookup, Deezer catalog match, or MusicBrainz relationship |
+| SoundCloud | Yes | Odesli, SoundCloud search match (ISRC preferred), or MusicBrainz relationship |
 
 Catalog coverage varies by track and country. A search button is a deliberate result, not a claim that an exact match was found.
 
 ## How matching works
 
-1. **Parse and validate the input.** `lib.js` accepts known music domains and track URL formats. Album and playlist links are outside this MVP's scope.
-2. **Fetch source metadata.** Apple and Deezer provide catalog metadata; Spotify uses its official oEmbed endpoint unless optional Spotify API credentials are configured. YouTube and SoundCloud use oEmbed. Some oEmbed responses lack artist or duration.
-3. **Consult MusicBrainz.** For a Spotify URL, TuneBridge looks for a linked MusicBrainz recording, then reads artist, duration, ISRCs, and recording URL relationships. An ISRC found later can also lead to linked destination URLs.
-4. **Recover missing Spotify metadata from artwork.** If the source supplies only a title and cover, TuneBridge compares the cover with Apple catalog candidates for that title. It accepts a nearly identical, unambiguous candidate and obtains artist and duration from that result.
-5. **Compare catalog candidates.** Apple and Deezer candidates must agree on track title/version and artist, plus a close duration or matching ISRC. Live, remix, acoustic, and other version labels are checked to reduce false matches. Album artwork can help choose between otherwise plausible Apple releases.
-6. **Label the result.** Verified URLs are shown as **“Şarkıyı doğrudan aç”** (open track directly). Other platforms show **“Platformda ara”** (search on platform), leaving the final choice to the listener.
+1. **Parse and validate the input.** `lib.js` accepts known music domains and track URL formats; short share links are expanded by following their redirects. Album and playlist links are outside this MVP's scope.
+2. **Fetch source metadata.** Apple and Deezer provide catalog metadata. Spotify uses its Web API when credentials are configured, otherwise the public embed page (title, artists, duration). YouTube uses the watch page: auto-generated "Topic" uploads carry title, artist and album in their description; for music videos, "Artist - Title" is split and the video length is treated as unreliable. SoundCloud uses the track page data, including the label-supplied artist and ISRC when present. oEmbed is the fallback everywhere.
+3. **Collect verified cross-platform links.** [Odesli](https://odesli.co) (song.link) is queried for every input, and MusicBrainz for Spotify inputs. Every Odesli result must agree with the source on title/version and artist before it is used.
+4. **Recover missing metadata from artwork.** If the source still has only a title and cover, TuneBridge compares the cover with Apple catalog candidates for that title and accepts a nearly identical, unambiguous candidate.
+5. **Search the remaining catalogs.** Apple, Deezer, YouTube Music (songs only), SoundCloud and, with credentials, Spotify are searched. A candidate must agree on track title/version and artist, plus a close duration (≤ 6 s) or matching ISRC. Live, remix, acoustic, cover and other version labels are checked to reduce false matches. When the ISRC is known, Deezer and Spotify are looked up by ISRC directly. For a music-video source, a title and artist match is accepted only when every such catalog result is the same recording.
+6. **Label the result.** Verified URLs are shown as **“Şarkıyı doğrudan aç”** (open track directly): they open the track's own page, and the listener presses play. Platforms where the song could not be verified show **“Platformda ara”** (search on platform).
 
-This is a conservative matching system, not an audio fingerprinting service. Catalog records can be incomplete, and two releases can share metadata or artwork. The app does not stream music or start playback through a service API; opening a direct link hands control to that platform.
+This is a conservative matching system, not an audio fingerprinting service. Catalog records can be incomplete, and two releases can share metadata or artwork. The app does not stream music or start playback through a service API; opening a direct link hands control to that platform. YouTube Music has no separate song page, so its direct link is a watch URL, and the YouTube Music app may start playing it on open.
+
+YouTube Music search, the YouTube watch page and SoundCloud search are unofficial public web endpoints; if they change, those platforms fall back to search links until the parser is updated.
 
 ## Quick start
 
@@ -60,7 +62,7 @@ http://localhost:3000/s?url=https%3A%2F%2Fopen.spotify.com%2Ftrack%2F3V9Cf4pENsR
 
 The example is **“Divane” by Yaşar**. In the tested catalog, TuneBridge resolves direct Apple Music and Deezer track links for it. Results can change when external catalogs change.
 
-Run the focused tests with `npm test`. There is no build step for the web app: `server.js` serves `public/` and provides the resolution API.
+Run the focused tests with `npm test`; they mock every network request. There is no build step for the web app: `server.js` serves `public/` and provides the resolution API.
 
 ## Configuration
 
@@ -73,6 +75,8 @@ All variables are server-side environment variables. Never put Spotify credentia
 | `MUSICBRAINZ_CONTACT` | Recommended for public hosting | Reachable contact URL or email in the MusicBrainz user agent. |
 | `SPOTIFY_CLIENT_ID` | No | Enables Spotify Web API track lookup and search when paired with the secret. |
 | `SPOTIFY_CLIENT_SECRET` | No | Server-only Spotify client secret. |
+| `ODESLI_API_KEY` | Recommended for public hosting | Odesli API key; without it the public API allows about 10 lookups per minute. |
+| `SOUNDCLOUD_CLIENT_ID` | No | Fixed SoundCloud api-v2 client ID; otherwise it is read from SoundCloud's web player. |
 
 For a local PowerShell session, for example:
 

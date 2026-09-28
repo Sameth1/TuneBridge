@@ -3,7 +3,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveMusicUrl } from './resolve.js';
-import { parseMusicUrl } from './lib.js';
+import { parseMusicUrl, isShortMusicLink } from './lib.js';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
 const port = Number(process.env.PORT || 3000);
@@ -11,7 +11,7 @@ const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=
 const cache = new Map();
 
 async function cachedResolve(source, country = 'us') {
-  const key = `${country}:${parseMusicUrl(source).url}`;
+  const key = `${country}:${isShortMusicLink(source) ? source.trim() : parseMusicUrl(source).url}`;
   const cached = cache.get(key);
   if (cached && cached.until > Date.now()) return cached.value;
   const value = resolveMusicUrl(source, country);
@@ -41,7 +41,11 @@ const server = http.createServer(async (req, res) => {
       catch (error) { return respond(res, 400, { error: error.message || 'Şarkı çözümlenemedi.' }); }
     }
     if (url.pathname === '/api/check') {
-      try { parseMusicUrl(url.searchParams.get('url') || ''); return respond(res, 200, { valid: true }); }
+      try {
+        const source = url.searchParams.get('url') || '';
+        if (!isShortMusicLink(source)) parseMusicUrl(source);
+        return respond(res, 200, { valid: true });
+      }
       catch (error) { return respond(res, 400, { error: error.message }); }
     }
     const file = url.pathname === '/' || url.pathname === '/s' ? '/index.html' : url.pathname;

@@ -65,7 +65,7 @@ final class ShareViewController: UIViewController {
         }
         let linkText = raw.range(of: #"https?://[^\s]+"#, options: .regularExpression).map { String(raw[$0]) } ?? raw
         guard let source = URL(string: linkText.trimmingCharacters(in: .whitespacesAndNewlines)),
-              ["music.apple.com", "open.spotify.com", "music.youtube.com", "www.deezer.com", "deezer.com", "soundcloud.com"].contains(source.host?.lowercased() ?? ""),
+              ["music.apple.com", "geo.music.apple.com", "open.spotify.com", "spotify.link", "music.youtube.com", "www.youtube.com", "youtube.com", "m.youtube.com", "youtu.be", "www.deezer.com", "deezer.com", "link.deezer.com", "deezer.page.link", "soundcloud.com", "m.soundcloud.com", "on.soundcloud.com"].contains(source.host?.lowercased() ?? ""),
               let base = Bundle.main.object(forInfoDictionaryKey: "ShareBaseURL") as? String,
               !base.contains("YOUR_DOMAIN_HERE"),
               var components = URLComponents(string: base + "/s") else {
