@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b0c12">
+  <meta name="description" content="Bir şarkıyı herkes kendi müzik uygulamasında açsın.">
+  <title>TuneBridge — Müzik herkesin uygulamasında</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="glow glow-one"></div><div class="glow glow-two"></div>
+  <header class="site-header">
+    <a class="brand" href="/" aria-label="TuneBridge ana sayfa"><span class="brand-icon">↗</span> Tune<span>Bridge</span></a>
+    <span class="header-note">Müziğin ortak adresi</span>
+  </header>
+  <main>
+    <section class="hero" id="hero">
+      <div class="eyebrow"><span class="eyebrow-dot"></span> PLATFORM SINIRLARINI KALDIR</div>
+      <h1>Bir şarkı.<br><em>Herkesin</em> uygulamasında.</h1>
+      <p class="intro">Apple Music’ten paylaş, arkadaşın Spotify’da açsın. Şarkıyı yeniden aramaya, adını başka alfabeyle yazmaya gerek yok.</p>
+      <form id="link-form" class="link-form">
+        <label for="music-url">Şarkı bağlantısını yapıştır</label>
+        <div class="input-wrap"><span class="input-icon">↗</span><input id="music-url" type="url" inputmode="url" autocomplete="url" spellcheck="false" placeholder="https://music.apple.com/…" required><button type="submit" id="submit-button">Bağlantı oluştur <span>→</span></button></div>
+        <p class="input-hint">Apple Music, Spotify, YouTube Music, Deezer ve SoundCloud bağlantıları</p>
+      </form>
+      <div id="form-error" class="error" role="alert" hidden></div>
+      <div class="flow"><span>01 <b>Bağlantıyı ekle</b></span><i></i><span>02 <b>Ortak bağlantıyı paylaş</b></span><i></i><span>03 <b>Arkadaşın kendi uygulamasında açsın</b></span></div>
+    </section>
+    <section id="result" class="result" hidden>
+      <div class="result-heading"><span class="eyebrow">PAYLAŞIMA HAZIR</span><a href="/">Yeni şarkı ekle ↗</a></div>
+      <div class="song-card"><div id="artwork" class="artwork">♫</div><div class="song-meta"><span>ŞİMDİ PAYLAŞILIYOR</span><h2 id="song-title"></h2><p id="song-artist"></p><small id="song-album"></small><small id="song-duration"></small></div></div>
+      <div class="share-box"><div><span>TEK BAĞLANTI, TÜM PLATFORMLAR</span><p id="share-url"></p></div><button id="copy-button" type="button">Bağlantıyı kopyala</button><button id="native-share-button" type="button" hidden>Paylaş</button></div>
+      <div class="platform-heading"><h3>Nasıl dinlemek istersin?</h3><p>Doğrudan bulunan şarkılar üstte gösterilir.</p></div>
+      <div id="platform-list" class="platform-list"></div>
+      <p class="result-note">“Platformda ara” yazan bağlantılar kesin eşleşme değildir. Yanlış şarkıyı açmamak için arama sonucunu sen seçersin.</p>
+    </section>
+  </main>
+  <footer><span>TuneBridge · İlk sürüm</span><span>Müzik sınır tanımasın.</span></footer>
+</body>
+</html>
