@@ -116,7 +116,10 @@ function render(data, shareUrl) {
   nativeShare.onclick = () => navigator.share({ title: data.song.title, text: `${data.song.title} — ${data.song.artist}`, url: shareUrl }).catch(() => {});
   const list = document.querySelector('#platform-list');
   list.replaceChildren();
-  for (const platform of [...data.platforms].sort((a, b) => Number(b.exact) - Number(a.exact))) {
+  // The visitor's remembered app comes first, then direct links; whoever opened the page taps once.
+  const preferred = storage.get(PREFERRED_KEY);
+  const rank = platform => (platform.id === preferred && platform.exact ? 0 : platform.exact ? 1 : 2);
+  for (const platform of [...data.platforms].sort((a, b) => rank(a) - rank(b))) {
     const item = document.createElement('a');
     item.className = 'platform';
     item.href = platform.url;
@@ -136,9 +139,10 @@ function render(data, shareUrl) {
     const name = document.createElement('span');
     name.className = 'platform-name';
     name.textContent = platform.name;
+    if (rank(platform) === 0) item.classList.add('platform-preferred');
     const state = document.createElement('span');
     state.className = 'platform-state';
-    state.textContent = platform.exact ? t(isAlbum ? 'openAlbum' : 'openDirect') : t('searchPlatform');
+    state.textContent = [rank(platform) === 0 ? t('preferred') : '', platform.exact ? t(isAlbum ? 'openAlbum' : 'openDirect') : t('searchPlatform')].filter(Boolean).join(' · ');
     details.append(name, state);
     const arrow = document.createElement('span');
     arrow.className = 'platform-arrow';
@@ -181,6 +185,18 @@ installButton.addEventListener('click', async () => {
 });
 window.addEventListener('appinstalled', () => { installButton.hidden = true; });
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+
+// For a link someone sent in WhatsApp and the like: copy it, open TuneBridge, one tap.
+const pasteButton = document.querySelector('#paste-button');
+pasteButton.hidden = !navigator.clipboard?.readText;
+pasteButton.addEventListener('click', async () => {
+  try {
+    const link = sharedLink(new URLSearchParams({ text: await navigator.clipboard.readText() }));
+    if (!link) return showError('shareNoLink');
+    input.value = link;
+    loadSong(link);
+  } catch { input.focus(); }
+});
 
 form.addEventListener('submit', event => { event.preventDefault(); loadSong(input.value.trim()); });
 const params = new URLSearchParams(location.search);

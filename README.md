@@ -56,6 +56,7 @@ Nobody needs an account, and the recipient needs nothing installed.
 
 - **Android (Chrome, Edge, Samsung Internet):** the site is an installable web app. After *Add to home screen* (the button in the header, or the browser menu), **TuneBridge appears in the phone's Share menu**. Sharing a song from Spotify, Apple Music, YouTube or any other app opens `/share`, which finds the link in the shared text, drops tracking parameters (`si`, `utm_*` …) and shows the TuneBridge page to send on.
 - **iPhone:** Safari does not let web apps join the Share menu. Two options: a Shortcuts shortcut with *Show in Share Sheet* on that opens `https://<your-domain>/share?url=` + *Shortcut Input* (no App Store needed), or the native Share Extension in `ios/` (needs an Apple Developer account to distribute).
+- **A plain Spotify/Apple/YouTube link received in WhatsApp or similar:** tapping it always opens that platform — the phone decides, and no website or app can take over another service's links. Instead, long-press the link and share it to TuneBridge (Android, or the iPhone shortcut), or copy it and use **Paste a copied link** on the home page. The recipient's remembered app is listed first and highlighted.
 - **Recipient:** opens the shared link in any browser and taps their app. With *Open links in the app I pick next time* ticked, later TuneBridge links open straight in that app after a short “Opening in Spotify…” notice with a *Choose another app* button. The choice is kept only in that browser.
 
 ## Quick start
