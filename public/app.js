@@ -209,19 +209,27 @@ document.querySelector('#new-search-button').addEventListener('click', () => {
   input.focus({ preventScroll: true });
 });
 
-// Search history is opt-in and stays in this browser; switching it off deletes it.
+// Search history is opt-in and stays in this browser. Deleting everything (or switching saving off,
+// which deletes the list) asks first; "Select" deletes chosen entries only.
 const historyEnabled = document.querySelector('#history-enabled');
 const historyList = document.querySelector('#history-list');
-const historyClear = document.querySelector('#history-clear');
+const historyActions = document.querySelector('#history-actions');
+const historySelect = document.querySelector('#history-select');
+const historyDeleteSelected = document.querySelector('#history-delete-selected');
+const historyDeleteAll = document.querySelector('#history-delete-all');
+const historyDone = document.querySelector('#history-done');
+let selecting = false;
+const selected = new Set();
 
 function savedHistory() {
   try { return JSON.parse(storage.get(HISTORY_KEY) || '[]').filter(entry => entry?.url && entry?.title); } catch { return []; }
 }
+const saveHistory = entries => (entries.length ? storage.set(HISTORY_KEY, JSON.stringify(entries)) : storage.remove(HISTORY_KEY));
 
 function remember(sourceUrl, data) {
   if (storage.get(HISTORY_ENABLED_KEY) !== '1') return;
   const entry = { url: sourceUrl, title: data.song.title, artist: data.song.artist || '', artwork: data.song.artwork || '', kind: data.kind || 'track', at: Date.now() };
-  storage.set(HISTORY_KEY, JSON.stringify([entry, ...savedHistory().filter(item => item.url !== sourceUrl)].slice(0, HISTORY_LIMIT)));
+  saveHistory([entry, ...savedHistory().filter(item => item.url !== sourceUrl)].slice(0, HISTORY_LIMIT));
   renderHistory();
 }
 
@@ -229,8 +237,15 @@ function renderHistory() {
   const enabled = storage.get(HISTORY_ENABLED_KEY) === '1';
   historyEnabled.checked = enabled;
   const entries = enabled ? savedHistory() : [];
-  historyClear.hidden = !entries.length;
+  if (!entries.length) { selecting = false; selected.clear(); }
+  for (const url of [...selected]) if (!entries.some(entry => entry.url === url)) selected.delete(url);
   historyList.hidden = !enabled;
+  historyList.classList.toggle('selecting', selecting);
+  historyActions.hidden = !entries.length;
+  historySelect.hidden = selecting;
+  historyDone.hidden = historyDeleteAll.hidden = historyDeleteSelected.hidden = !selecting;
+  historyDeleteSelected.disabled = !selected.size;
+  historyDeleteSelected.textContent = t('historyDeleteSelected')(selected.size);
   historyList.replaceChildren();
   if (enabled && !entries.length) {
     const empty = document.createElement('li');
@@ -243,6 +258,14 @@ function renderHistory() {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'history-item';
+    if (selecting) {
+      button.setAttribute('role', 'checkbox');
+      button.setAttribute('aria-checked', String(selected.has(entry.url)));
+      const tick = document.createElement('span');
+      tick.className = 'history-tick';
+      tick.textContent = selected.has(entry.url) ? '✓' : '';
+      button.append(tick);
+    }
     const art = document.createElement('span');
     art.className = 'history-art';
     if (entry.artwork) {
@@ -259,7 +282,11 @@ function renderHistory() {
     artist.textContent = [entry.kind === 'album' ? t('albumLabel') : '', entry.artist].filter(Boolean).join(' · ');
     text.append(title, artist);
     button.append(art, text);
-    button.addEventListener('click', () => { input.value = entry.url; loadSong(entry.url); });
+    button.addEventListener('click', () => {
+      if (!selecting) { input.value = entry.url; loadSong(entry.url); return; }
+      if (selected.has(entry.url)) selected.delete(entry.url); else selected.add(entry.url);
+      renderHistory();
+    });
     item.append(button);
     historyList.append(item);
   }
@@ -267,10 +294,21 @@ function renderHistory() {
 
 historyEnabled.addEventListener('change', () => {
   if (historyEnabled.checked) storage.set(HISTORY_ENABLED_KEY, '1');
-  else { storage.remove(HISTORY_ENABLED_KEY); storage.remove(HISTORY_KEY); }
+  else if (!savedHistory().length || confirm(t('historyConfirmOff'))) { storage.remove(HISTORY_ENABLED_KEY); storage.remove(HISTORY_KEY); }
   renderHistory();
 });
-historyClear.addEventListener('click', () => { storage.remove(HISTORY_KEY); renderHistory(); });
+historySelect.addEventListener('click', () => { selecting = true; renderHistory(); });
+historyDone.addEventListener('click', () => { selecting = false; selected.clear(); renderHistory(); });
+historyDeleteSelected.addEventListener('click', () => {
+  saveHistory(savedHistory().filter(entry => !selected.has(entry.url)));
+  selected.clear();
+  renderHistory();
+});
+historyDeleteAll.addEventListener('click', () => {
+  if (!confirm(t('historyConfirmAll'))) return;
+  storage.remove(HISTORY_KEY);
+  renderHistory();
+});
 
 // For a link someone sent in WhatsApp and the like: copy it, open TuneBridge, one tap.
 const pasteButton = document.querySelector('#paste-button');
