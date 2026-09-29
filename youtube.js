@@ -1,5 +1,5 @@
 import { fetchJson, fetchText, extractJsonAfter, findAllDeep } from './http.js';
-import { cleanChannelName, splitArtistTitle, artistsOverlap, compactName, youtubeUrl } from './lib.js';
+import { cleanChannelName, splitArtistTitle, artistsOverlap, compactName, youtubeUrl, titleVariants } from './lib.js';
 
 // Consent cookies keep EU visitors from being redirected to consent.youtube.com.
 const PAGE_HEADERS = { 'Accept-Language': 'en-US,en;q=0.9', Cookie: 'SOCS=CAI; CONSENT=YES+1' };
@@ -66,24 +66,71 @@ async function youtubePlayer(id) {
   });
 }
 
+async function musicNext(videoId) {
+  return fetchJson('https://music.youtube.com/youtubei/v1/next?prettyPrint=false', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Origin: 'https://music.youtube.com', Referer: 'https://music.youtube.com/', ...PAGE_HEADERS },
+    body: JSON.stringify({ context: { client: MUSIC_CLIENT }, videoId, isAudioOnly: true })
+  });
+}
+
+const pageType = run => run?.navigationEndpoint?.browseEndpoint?.browseEndpointContextSupportedConfigs?.browseEndpointContextMusicConfig?.pageType;
+
+// YouTube Music's own view of a video: the song's name ("Nour El Ain" for a video titled
+// "Nour El Ein | Official Music Video - HD Version | …"), its artist and length, and whether the
+// video is the audio track itself (ATV, exact length) or a music video (length includes intros).
+export function songFromMusicNext(response, videoId) {
+  const items = findAllDeep(response, 'playlistPanelVideoRenderer');
+  const item = items.find(entry => entry.videoId === videoId) || items[0];
+  const title = (item?.title?.runs || []).map(run => run.text).join('');
+  if (!title) return null;
+  const byline = item.longBylineText?.runs || [];
+  const artists = byline.filter(run => ['MUSIC_PAGE_TYPE_ARTIST', 'MUSIC_PAGE_TYPE_USER_CHANNEL'].includes(pageType(run))).map(run => run.text);
+  const album = byline.find(run => pageType(run) === 'MUSIC_PAGE_TYPE_ALBUM')?.text || '';
+  const type = item.navigationEndpoint?.watchEndpoint?.watchEndpointMusicSupportedConfigs?.watchEndpointMusicConfig?.musicVideoType;
+  return {
+    title,
+    artist: artists.length ? artists.join(', ') : byline.map(run => run.text).join('').split(' • ')[0] || '',
+    album,
+    duration: parseDuration((item.lengthText?.runs || []).map(run => run.text).join('')),
+    artwork: (item.thumbnail?.thumbnails || []).at(-1)?.url || null,
+    durationReliable: type === 'MUSIC_VIDEO_TYPE_ATV'
+  };
+}
+
+async function oembedSong(id) {
+  const data = await fetchJson(`https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(`https://www.youtube.com/watch?v=${id}`)}`);
+  const topic = /\s-\sTopic$/i.test(data.author_name || '');
+  const artist = cleanChannelName(data.author_name);
+  const variants = topic ? [data.title] : titleVariants(data.title, artist);
+  const split = topic ? null : splitArtistTitle(data.title.split(/\s+\|{1,2}\s+/)[0]);
+  return { title: variants[0], titleVariants: variants, rawTitle: data.title, artist: split && !artistsOverlap(artist, split.title) ? split.artist : artist,
+    album: '', duration: null, artwork: data.thumbnail_url, durationReliable: false };
+}
+
 export async function youtubeMetadata(id) {
   try {
     const song = youtubeSongFromPlayer(await youtubePlayer(id));
     if (song) return song;
-  } catch { /* Try the watch page next. */ }
+  } catch { /* YouTube may ask server IPs to sign in; YouTube Music still answers. */ }
+  const [music, embed] = await Promise.all([
+    musicNext(id).then(response => songFromMusicNext(response, id)).catch(() => null),
+    oembedSong(id).catch(() => null)
+  ]);
+  if (music) {
+    // YouTube Music keeps an uploader's own video title ("Barış Manço - Gülpembe HD Klip"), so clean it too;
+    // the video's title can hold other spellings or scripts of the name, which are searched as well.
+    const variants = [...new Set([...titleVariants(music.title, music.artist), ...(embed?.titleVariants || [])])]
+      .filter(variant => !artistsOverlap(music.artist, splitArtistTitle(variant)?.artist || ''));
+    return { ...music, title: variants[0] || music.title, artwork: embed?.artwork || music.artwork, titleVariants: variants };
+  }
   try {
     const html = await fetchText(`https://www.youtube.com/watch?v=${id}&hl=en`, { headers: PAGE_HEADERS });
     const song = youtubeSongFromPlayer(extractJsonAfter(html, 'ytInitialPlayerResponse = '));
     if (song) return song;
   } catch { /* Fall back to oEmbed below. */ }
-  const data = await fetchJson(`https://www.youtube.com/oembed?format=json&url=${encodeURIComponent(`https://www.youtube.com/watch?v=${id}`)}`);
-  const topic = /\s-\sTopic$/i.test(data.author_name || '');
-  const split = topic ? null : splitArtistTitle(data.title);
-  return {
-    title: cleanVideoTitle(split?.title || data.title),
-    artist: split?.artist || cleanChannelName(data.author_name),
-    album: '', duration: null, artwork: data.thumbnail_url, durationReliable: false
-  };
+  if (embed) return embed;
+  throw new Error('YouTube video not found');
 }
 
 function runsText(column) {
@@ -183,12 +230,7 @@ export function albumOfSong(response) {
 }
 
 export async function youtubeMusicAlbumOfVideo(videoId) {
-  const response = await fetchJson('https://music.youtube.com/youtubei/v1/next?prettyPrint=false', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Origin: 'https://music.youtube.com', Referer: 'https://music.youtube.com/', ...PAGE_HEADERS },
-    body: JSON.stringify({ context: { client: MUSIC_CLIENT }, videoId, isAudioOnly: true })
-  });
-  return albumOfSong(response);
+  return albumOfSong(await musicNext(videoId));
 }
 
 // An OLAK5uy_ album playlist: oEmbed gives "Album - <title>" and its first video, whose Topic upload names the artist.

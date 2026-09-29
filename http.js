@@ -13,16 +13,17 @@ async function request(url, options = {}) {
 }
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
-const transient = error => /HTTP (429|5\d\d)$/.test(error.message) || error instanceof SyntaxError;
+const transient = error => /HTTP (403|429|5\d\d)$/.test(error.message) || error instanceof SyntaxError;
 
-// `retry: true` repeats a request once after a rate limit, a server error, or an HTML
-// bot-check page where JSON was expected; catalogs such as Deezer do this intermittently.
+// `retry: true` repeats a request up to twice after a rate limit, a server error, a bot-check 403
+// or an HTML page where JSON was expected; catalogs such as Deezer do this intermittently.
 async function withRetry(url, options) {
-  try { return await request(url, options); }
-  catch (error) {
-    if (!options.retry || !transient(error)) throw error;
-    await sleep(1200);
-    return request(url, options);
+  for (let attempt = 0; ; attempt++) {
+    try { return await request(url, options); }
+    catch (error) {
+      if (!options.retry || !transient(error) || attempt >= 2) throw error;
+      await sleep(700 * (attempt + 1));
+    }
   }
 }
 

@@ -1,4 +1,4 @@
-import { UserError, PLATFORMS, parseMusicUrl, isShortMusicLink, confidentMatch, selectUniqueTitleArtist, searchLinks, normalize, sameTrackTitle, sameAlbumTitle, artistsOverlap, compactName, cleanTrackUrl, youtubeUrl } from './lib.js';
+import { UserError, PLATFORMS, parseMusicUrl, isShortMusicLink, confidentMatch, selectUniqueTitleArtist, searchLinks, normalize, sameTrackTitle, sameAlbumTitle, artistsOverlap, compactName, cleanTrackUrl, youtubeUrl, titleVariants, matchScore } from './lib.js';
 import { fetchJson, followRedirects } from './http.js';
 import { lookupSpotifyRecording, lookupIsrcRecording } from './musicbrainz.js';
 import { artworkSignature, artworkSimilarity, selectArtworkCandidate } from './artwork.js';
@@ -46,14 +46,19 @@ function deezerSong(track) {
   return { title: track.title, artist: track.artist?.name, album: track.album?.title, artwork: track.album?.cover_xl, duration: track.duration * 1000, isrc: track.isrc || null, url: track.link?.replace(/^http:/, 'https:') };
 }
 
-const query = song => `${normalize(song.title)} ${song.artist.split(',')[0]}`;
+const primary = artist => String(artist || '').split(',')[0].trim();
+const variantsOf = song => (song.titleVariants?.length ? song.titleVariants : [song.title]);
+const asVariants = song => variantsOf(song).map(title => ({ ...song, title }));
+const query = song => `${normalize(song.title)} ${primary(song.artist)}`;
+// Search phrasings for the song's names ("Nour El Ain", "Nour El Ein", "نور العين"), most likely first.
+const queries = (song, limit = 2) => [...new Set(variantsOf(song).slice(0, limit).map(title => `${normalize(title)} ${primary(song.artist)}`))];
 
 // Strict matches first: same ISRC, then candidates that carry an ISRC (official releases),
 // then the release on the source's album (not a later single or compilation), then closest duration.
 function rankMatches(song, candidates) {
   const score = candidate => (song.isrc && candidate.isrc === song.isrc ? 0 : candidate.isrc ? 1 : 2);
   const sameAlbum = candidate => (song.album && candidate.album && sameAlbumTitle(song.album, candidate.album) ? 0 : 1);
-  return candidates.filter(candidate => candidate.url && confidentMatch(song, candidate)).sort((a, b) =>
+  return candidates.filter(candidate => candidate.url && asVariants(song).some(variant => confidentMatch(variant, candidate))).sort((a, b) =>
     score(a) - score(b) || sameAlbum(a) - sameAlbum(b) ||
     Math.abs((a.duration || 0) - song.duration) - Math.abs((b.duration || 0) - song.duration));
 }
@@ -61,41 +66,77 @@ function rankMatches(song, candidates) {
 function pickCandidate(song, candidates) {
   const strict = rankMatches(song, candidates);
   if (strict.length) return strict[0];
-  return song.durationReliable === false || !song.duration ? selectUniqueTitleArtist(song, candidates.filter(c => c.url)) : null;
+  if (song.durationReliable !== false && song.duration) return null;
+  for (const variant of asVariants(song)) {
+    const unique = selectUniqueTitleArtist(variant, candidates.filter(c => c.url));
+    if (unique) return unique;
+  }
+  return null;
+}
+
+// Collects every candidate a platform search saw. Exact matches are taken as soon as they appear;
+// otherwise the closest one (score ≥ 0.78 on name, artist, length and cover) comes back marked `close`.
+function matcher(song) {
+  const seen = [];
+  return {
+    exact(candidates) { seen.push(...candidates); return pickCandidate(song, candidates); },
+    see(candidates) { seen.push(...candidates); },
+    async closest() {
+      const ranked = seen.filter(candidate => candidate?.url)
+        .map(candidate => ({ candidate, ...matchScore(song, candidate) }))
+        .filter(entry => entry.title >= 0.72 && entry.artist >= 0.6 && entry.score >= 0.7)
+        .sort((a, b) => b.score - a.score).slice(0, 3);
+      if (!ranked.length) return null;
+      // Near-identical cover art supports a candidate; only catalog covers are compared, not video frames.
+      const source = song.artwork ? await artworkSignature(song.artwork).catch(() => null) : null;
+      if (source) {
+        await Promise.all(ranked.map(async entry => {
+          const similarity = artworkSimilarity(source, await artworkSignature(entry.candidate.artwork).catch(() => null)) || 0;
+          entry.score += similarity >= 0.95 ? 0.08 : similarity >= 0.9 ? 0.04 : 0;
+        }));
+        ranked.sort((a, b) => b.score - a.score);
+      }
+      const best = ranked[0];
+      return best.score >= 0.78 ? { ...best.candidate, close: true, score: Math.min(1, best.score) } : null;
+    }
+  };
 }
 
 async function findApple(song, country) {
   if (appleMusicConfigured()) {
     const official = await findAppleMusic(song, country).catch(() => null);
-    if (official) return official;
+    if (official && !official.close) return official;
   }
-  const candidates = (await itunesSearch(query(song), country).catch(() => [])).map(appleSong);
-  const matches = rankMatches(song, candidates);
-  if (matches.length > 1 && song.artwork) {
-    const sourceImage = await artworkSignature(song.artwork);
-    if (sourceImage) {
-      const ranked = await Promise.all(matches.slice(0, 6).map(async candidate => ({
-        candidate,
-        similarity: artworkSimilarity(sourceImage, await artworkSignature(candidate.track.artworkUrl100?.replace('100x100bb', '300x300bb'))) || 0
-      })));
-      ranked.sort((a, b) => b.similarity - a.similarity);
-      if (ranked[0]?.similarity >= 0.97) return ranked[0].candidate;
+  const pool = matcher(song);
+  for (const phrase of queries(song)) {
+    const candidates = (await itunesSearch(phrase, country).catch(() => [])).map(appleSong);
+    const matches = rankMatches(song, candidates);
+    if (matches.length > 1 && song.artwork) {
+      const sourceImage = await artworkSignature(song.artwork);
+      if (sourceImage) {
+        const ranked = await Promise.all(matches.slice(0, 6).map(async candidate => ({
+          candidate,
+          similarity: artworkSimilarity(sourceImage, await artworkSignature(candidate.artwork)) || 0
+        })));
+        ranked.sort((a, b) => b.similarity - a.similarity);
+        if (ranked[0]?.similarity >= 0.97) return ranked[0].candidate;
+      }
     }
+    const found = pool.exact(candidates);
+    if (found) return found;
   }
-  const found = matches[0] || pickCandidate(song, candidates);
-  if (found) return found;
   // The title alone finds songs whose artist is spelled differently on Apple (another script, "&" vs ",").
-  const byTitle = pickCandidate(song, (await itunesSearch(normalize(song.title), country, 'song', 50).catch(() => [])).map(appleSong));
-  return byTitle || findAppleByListenbrainz(song, country);
+  const byTitle = pool.exact((await itunesSearch(normalize(song.title), country, 'song', 50).catch(() => [])).map(appleSong));
+  return byTitle || await findAppleByListenbrainz(song, country, pool) || pool.closest();
 }
 
 // ListenBrainz's Apple Music ids, confirmed through iTunes lookup or, when iTunes is rate-limited, Apple's song page.
-async function findAppleByListenbrainz(song, country) {
+async function findAppleByListenbrainz(song, country, pool) {
   const ids = await listenbrainzIds('apple', song).catch(() => []);
   if (!ids.length) return null;
   let candidates = await itunesLookup(ids, country).then(results => results.filter(r => r.wrapperType === 'track').map(appleSong)).catch(() => null);
   candidates ||= (await Promise.all(ids.map(id => applePageSong(id, country).catch(() => null)))).filter(Boolean);
-  return pickCandidate(song, candidates);
+  return pool.exact(candidates);
 }
 
 async function findAppleMusic(song, country) {
@@ -127,17 +168,27 @@ async function findDeezer(song) {
       (sameTrackTitle(song.title, track.title) || artistsOverlap(song.artist, track.artist?.name));
     if (agrees) return deezerSong(track);
   }
-  const search = async q => ((await fetchJson(`https://api.deezer.com/search?q=${encodeURIComponent(q)}&limit=15`, { retry: true })).data || []).map(deezerSong);
-  const found = pickCandidate(song, await search(query(song)));
-  if (found) return found;
+  const pool = matcher(song);
+  const search = async q => ((await fetchJson(`https://api.deezer.com/search?q=${encodeURIComponent(q)}&limit=15`, { retry: true }).catch(() => ({}))).data || []).map(deezerSong);
+  for (const phrase of queries(song)) {
+    const found = pool.exact(await search(phrase));
+    if (found) return found;
+  }
   // Deezer's field search is stricter about which words belong to the artist and which to the title.
-  return pickCandidate(song, await search(`artist:"${song.artist.split(',')[0]}" track:"${normalize(song.title)}"`));
+  return pool.exact(await search(`artist:"${primary(song.artist)}" track:"${normalize(song.title)}"`)) || pool.closest();
 }
 
-// Spotify Web API when credentials exist; otherwise (or when it finds nothing) ListenBrainz ids checked via embed pages.
+// Spotify Web API when credentials exist; otherwise (or when it finds nothing) ListenBrainz ids checked via embed pages,
+// once for each of the song's names.
 async function findSpotify(song) {
-  const viaApi = pickCandidate(song, await searchSpotify(song).catch(() => []));
-  return viaApi || pickCandidate(song, await searchSpotifyKeyless(song));
+  const pool = matcher(song);
+  const viaApi = pool.exact(await searchSpotify(song).catch(() => []));
+  if (viaApi) return viaApi;
+  for (const variant of asVariants(song).slice(0, 2)) {
+    const found = pool.exact(await searchSpotifyKeyless(variant).catch(() => []));
+    if (found) return found;
+  }
+  return pool.closest();
 }
 const asTarget = (platform, candidates) => candidates.map(candidate => ({ ...candidate, url: youtubeUrl(platform, candidate.videoId) }));
 
@@ -146,18 +197,24 @@ const ofKind = (uploads, kind) => uploads.filter(video => video.official === kin
 // YouTube Music: the song itself — its "Songs" search, then the auto-generated Topic upload,
 // then an official upload of the audio, then the official video.
 async function findYoutubeMusic(song, country, videos) {
-  const fromMusic = pickCandidate(song, await searchYoutubeMusic(query(song), country).catch(() => []));
-  if (fromMusic) return fromMusic;
+  const pool = matcher(song);
+  for (const phrase of queries(song)) {
+    const fromMusic = pool.exact(await searchYoutubeMusic(phrase, country).catch(() => []));
+    if (fromMusic) return fromMusic;
+  }
   const uploads = asTarget('youtubeMusic', await videos());
+  pool.see(uploads);
   return pickCandidate(song, ofKind(uploads, 'topic')) || pickCandidate(song, uploads) ||
-    closestOfficialVideo(song, ofKind(uploads, 'artist')) || closestOfficialVideo(song, ofKind(uploads, 'label'));
+    closestOfficialVideo(song, ofKind(uploads, 'artist')) || closestOfficialVideo(song, ofKind(uploads, 'label')) || pool.closest();
 }
 
 // YouTube: the artist's own music video first, then the Topic upload, then the label's upload.
 async function findYoutube(song, country, videos) {
   const uploads = asTarget('youtube', await videos());
+  const pool = matcher(song);
+  pool.see(uploads);
   return closestOfficialVideo(song, ofKind(uploads, 'artist')) || pickCandidate(song, ofKind(uploads, 'topic')) ||
-    closestOfficialVideo(song, ofKind(uploads, 'label')) || pickCandidate(song, uploads);
+    closestOfficialVideo(song, ofKind(uploads, 'label')) || pickCandidate(song, uploads) || pool.closest();
 }
 
 // An official music video of the same song can run longer than the track (intro, outro): up to 90 s on the
@@ -165,13 +222,21 @@ async function findYoutube(song, country, videos) {
 function closestOfficialVideo(song, videos) {
   if (!song.duration) return null;
   return videos
-    .filter(video => sameTrackTitle(song.title, video.title) && artistsOverlap(song.artist, video.artist) && video.duration &&
+    .filter(video => variantsOf(song).some(title => sameTrackTitle(title, video.title)) && artistsOverlap(song.artist, video.artist) && video.duration &&
       Math.abs(video.duration - song.duration) <= (video.official === 'label' ? 20_000 : 90_000))
     .sort((a, b) => Math.abs(a.duration - song.duration) - Math.abs(b.duration - song.duration))[0] || null;
 }
 // SoundCloud is full of re-uploads: accept label-distributed tracks and the artist's own account only.
-const ownAccount = (song, uploader) => compactName(song.artist.split(',')[0]).length >= 3 && compactName(uploader).includes(compactName(song.artist.split(',')[0]));
-const findSoundcloud = async song => pickCandidate(song, (await searchSoundcloud(query(song))).filter(track => track.distributed || ownAccount(song, track.uploader)));
+const ownAccount = (song, uploader) => compactName(primary(song.artist)).length >= 3 && compactName(uploader).includes(compactName(primary(song.artist)));
+async function findSoundcloud(song) {
+  const pool = matcher(song);
+  for (const phrase of queries(song)) {
+    const tracks = (await searchSoundcloud(phrase)).filter(track => track.distributed || ownAccount(song, track.uploader));
+    const found = pool.exact(tracks);
+    if (found) return found;
+  }
+  return pool.closest();
+}
 
 const acceptsTrackUrl = url => { try { parseMusicUrl(url); return true; } catch { return false; } };
 
@@ -205,13 +270,23 @@ export async function resolveMusicUrl(rawUrl, country = 'us') {
     }
   }
 
+  // Long or annotated names ("Song | Official Video | …", "Song - 2011 Remaster") are also searched in their plain forms.
+  song.titleVariants = [...new Set([...(song.titleVariants || []), ...titleVariants(song.title, song.artist)])];
+  // Closest (not exact) results per platform: { url, title, artist, score }.
+  const close = {};
+  const record = (platform, match) => {
+    if (!match?.url || exact[platform]) return;
+    if (match.close) { if (!close[platform] || close[platform].score < match.score) close[platform] = { url: match.url, title: match.title, artist: match.artist, score: match.score }; }
+    else { exact[platform] = match.url; delete close[platform]; }
+  };
+
   const knownIsrc = song.isrc;
   const guessedDuration = !song.durationReliable;
   if (song.artist) {
     // Two phrasings: uploads are usually titled "Artist - Title", Topic uploads just "Title".
     let videoSearch;
     const videos = () => (videoSearch ||= Promise.all([
-      searchYoutubeVideos(`${song.artist.split(',')[0]} - ${song.title}`, country).catch(() => []),
+      searchYoutubeVideos(`${primary(song.artist)} - ${song.title}`, country).catch(() => []),
       searchYoutubeVideos(query(song), country).catch(() => [])
     ]).then(([first, second]) => [...first, ...second].filter((video, i, all) => all.findIndex(v => v.videoId === video.videoId) === i)));
     const searches = {
@@ -222,23 +297,33 @@ export async function resolveMusicUrl(rawUrl, country = 'us') {
     const tasks = Object.entries(searches).filter(([platform]) => !exact[platform]);
     const results = await Promise.allSettled(tasks.map(([, find]) => find()));
     const found = {};
-    results.forEach((result, i) => { if (result.status === 'fulfilled' && result.value?.url) found[tasks[i][0]] = result.value; });
-    add(Object.fromEntries(Object.entries(found).map(([platform, match]) => [platform, match.url])));
-    // A catalog release is a better source of album, duration and ISRC than a video page.
-    const reference = found.apple || found.deezer || found.spotify;
+    results.forEach((result, i) => {
+      if (result.status !== 'fulfilled' || !result.value?.url) return;
+      found[tasks[i][0]] = result.value;
+      record(tasks[i][0], result.value);
+    });
+    // A catalog release is a better source of name, album, duration and ISRC than a video page;
+    // an exact catalog match is preferred, a closest one is used only to look further.
+    const catalog = ['apple', 'deezer', 'spotify'].map(platform => found[platform]).filter(Boolean);
+    const reference = catalog.find(match => !match.close) || catalog[0];
     if (reference) {
       song.album ||= reference.album;
-      // A video title is a guess ("Artist - Title (Official Video)"); the catalog title is the real one.
-      if (!song.durationReliable && reference.title) song.title = reference.title;
+      if (!song.durationReliable && reference.title) {
+        song.titleVariants = [...new Set([reference.title, ...song.titleVariants])];
+        song.title = reference.title;
+      }
       if (!song.duration || !song.durationReliable) Object.assign(song, { duration: reference.duration || song.duration, durationReliable: true });
     }
-    song.isrc ||= found.deezer?.isrc || found.spotify?.isrc || found.soundcloud?.isrc || null;
-    // A video's length is only a hint; once a catalog supplied the real duration, retry the platforms
-    // that could not be matched without it.
+    if (!reference?.close) song.isrc ||= found.deezer?.isrc || found.spotify?.isrc || found.soundcloud?.isrc || null;
+    // A video's length is only a hint; once a catalog supplied the real duration and name, retry the
+    // platforms that were not matched exactly. Results built on a closest match stay "closest".
     if (guessedDuration && song.durationReliable) {
       const retry = tasks.filter(([platform]) => !exact[platform]);
       const again = await Promise.allSettled(retry.map(([platform]) => searches[platform]()));
-      again.forEach((result, i) => { if (result.status === 'fulfilled' && result.value?.url) exact[retry[i][0]] ||= result.value.url; });
+      again.forEach((result, i) => {
+        if (result.status !== 'fulfilled' || !result.value?.url) return;
+        record(retry[i][0], reference.close ? { ...result.value, close: true, score: result.value.score || reference.score } : result.value);
+      });
     }
   }
 
@@ -248,14 +333,17 @@ export async function resolveMusicUrl(rawUrl, country = 'us') {
   }
   // The catalog searches above ran without this ISRC; retry the ISRC-capable catalogs once.
   if (song.isrc && song.isrc !== knownIsrc) {
-    if (!exact.deezer) { const match = await findDeezer(song).catch(() => null); if (match?.url) exact.deezer = match.url; }
-    if (!exact.spotify) { const match = await findSpotify(song).catch(() => null); if (match?.url) exact.spotify = match.url; }
+    if (!exact.deezer) record('deezer', await findDeezer(song).catch(() => null));
+    if (!exact.spotify) record('spotify', await findSpotify(song).catch(() => null));
   }
+  for (const platform of Object.keys(close)) if (exact[platform]) delete close[platform];
 
-  // The same video id plays on both YouTube sites, so a match on one is an exact link for the other.
+  // The same video id plays on both YouTube sites, so a match on one is a link of the same kind for the other.
   for (const [from, to] of [['youtubeMusic', 'youtube'], ['youtube', 'youtubeMusic']]) {
     const id = exact[from] && new URL(exact[from]).searchParams.get('v');
-    if (id && !exact[to]) exact[to] = youtubeUrl(to, id);
+    if (id && !exact[to]) { exact[to] = youtubeUrl(to, id); delete close[to]; }
+    const closeId = !exact[to] && !close[to] && close[from] && new URL(close[from].url).searchParams.get('v');
+    if (closeId) close[to] = { ...close[from], url: youtubeUrl(to, closeId) };
   }
 
   const links = searchLinks(song.title, song.artist);
@@ -263,6 +351,11 @@ export async function resolveMusicUrl(rawUrl, country = 'us') {
     kind: 'track',
     song: { title: song.title, artist: song.artist, album: song.album, artwork: song.artwork, duration: song.duration },
     sourcePlatform: input.platform,
-    platforms: PLATFORMS.map(platform => ({ ...platform, url: exact[platform.id] || links[platform.id], exact: Boolean(exact[platform.id]) }))
+    platforms: PLATFORMS.map(platform => {
+      if (exact[platform.id]) return { ...platform, url: exact[platform.id], exact: true, match: 'exact' };
+      const nearest = close[platform.id];
+      if (nearest) return { ...platform, url: nearest.url, exact: false, match: 'close', matchTitle: nearest.title, matchArtist: nearest.artist, score: Math.round(nearest.score * 100) / 100 };
+      return { ...platform, url: links[platform.id], exact: false, match: 'search' };
+    })
   };
 }

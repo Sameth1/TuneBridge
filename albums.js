@@ -1,4 +1,4 @@
-import { UserError, PLATFORMS, albumMatch, sameAlbumTitle, sameTrackTitle, artistsOverlap, normalize, searchLinks, youtubeAlbumUrl } from './lib.js';
+import { UserError, PLATFORMS, albumMatch, sameAlbumTitle, sameTrackTitle, artistsOverlap, normalize, searchLinks, youtubeAlbumUrl, titleSimilarity } from './lib.js';
 import { fetchJson, fetchText } from './http.js';
 import { itunesLookup, itunesSearch, appleAlbum, parseApplePage } from './apple.js';
 import { spotifyAlbumById, spotifyAlbumIdOfTrack, searchSpotifyKeyless, searchSpotifyAlbums } from './spotify.js';
@@ -51,7 +51,23 @@ async function albumMetadata(input, country) {
 // Matching albums, the same release year and track count first.
 function pickAlbum(album, candidates) {
   const score = candidate => (album.year && candidate.year === album.year ? 0 : 1) + (album.trackCount && candidate.trackCount === album.trackCount ? 0 : 1);
-  return candidates.filter(candidate => candidate.url && albumMatch(album, candidate)).sort((a, b) => score(a) - score(b))[0] || null;
+  const exact = candidates.filter(candidate => candidate.url && albumMatch(album, candidate)).sort((a, b) => score(a) - score(b))[0];
+  return exact || closestAlbum(album, candidates);
+}
+
+// No exact album: the most similar one by the same artist (a differently spelled name, one track more or
+// less), returned marked `close`. Different editions (Deluxe, Live…) still never count.
+function closestAlbum(album, candidates) {
+  const plain = value => String(value || '').replace(/\s[-–—]\s(single|ep)$/i, '');
+  const ranked = candidates.filter(candidate => candidate.url && artistsOverlap(album.artist, candidate.artist))
+    .map(candidate => {
+      const title = titleSimilarity(plain(album.title), plain(candidate.title));
+      const tracks = album.trackCount && candidate.trackCount ? Math.max(0, 1 - Math.abs(album.trackCount - candidate.trackCount) / 4) : 0.6;
+      const sameEdition = sameAlbumTitle(candidate.title, album.title) || !/deluxe|expanded|special|live|canlı|remix|acoustic|akustik/i.test(`${album.title} ${candidate.title}`);
+      return { candidate, score: sameEdition ? title * 0.75 + tracks * 0.25 : 0 };
+    })
+    .sort((a, b) => b.score - a.score);
+  return ranked[0]?.score >= 0.8 ? { ...ranked[0].candidate, close: true, score: ranked[0].score } : null;
 }
 
 async function findDeezerAlbum(album) {
@@ -67,7 +83,7 @@ async function findDeezerAlbum(album) {
   if (!match) return null;
   // The full album record carries the UPC, year and track list the other platforms are checked against.
   const full = await fetchJson(`https://api.deezer.com/album/${match.id}`, { retry: true }).catch(() => null);
-  return full?.id ? deezerAlbum(full) : match;
+  return full?.id ? { ...deezerAlbum(full), close: match.close, score: match.score } : match;
 }
 
 async function findAppleAlbum(album, country) {
@@ -128,11 +144,14 @@ export async function resolveAlbum(input, country = 'us') {
     exact.youtubeMusic = youtubeAlbumUrl('youtubeMusic', input.id);
   }
   const add = links => { for (const [platform, url] of Object.entries(links || {})) exact[platform] ||= url; };
+  const close = {};
 
   // Deezer first: its album record supplies the UPC, which makes MusicBrainz and Deezer lookups exact.
   if (!exact.deezer) {
     const deezer = await findDeezerAlbum(album).catch(() => null);
-    if (deezer) {
+    // Only an exact Deezer album may lend its UPC: a closest one could be another release.
+    if (deezer?.close) close.deezer = deezer;
+    else if (deezer) {
       exact.deezer = deezer.url;
       Object.assign(album, { upc: album.upc || deezer.upc, trackCount: album.trackCount || deezer.trackCount, year: album.year || deezer.year, artwork: album.artwork || deezer.artwork });
       if (!album.tracks.length) album.tracks = deezer.tracks;
@@ -146,15 +165,24 @@ export async function resolveAlbum(input, country = 'us') {
     youtubeMusic: () => findYoutubeMusicAlbum(album, country),
     soundcloud: () => findSoundcloudAlbum(album)
   };
-  const tasks = Object.entries(searches).filter(([platform]) => !exact[platform]);
+  const tasks = Object.entries(searches).filter(([platform]) => !exact[platform] && !close[platform]);
   const results = await Promise.allSettled(tasks.map(([, find]) => find()));
-  results.forEach((result, i) => { if (result.status === 'fulfilled' && result.value?.url) exact[tasks[i][0]] ||= result.value.url; });
+  results.forEach((result, i) => {
+    if (result.status !== 'fulfilled' || !result.value?.url) return;
+    if (result.value.close) close[tasks[i][0]] = result.value;
+    else exact[tasks[i][0]] ||= result.value.url;
+  });
 
   const links = searchLinks(album.title, album.artist);
   return {
     kind: 'album',
     song: { title: album.title, artist: album.artist, album: null, artwork: album.artwork, duration: null, trackCount: album.trackCount, year: album.year },
     sourcePlatform: input.platform,
-    platforms: PLATFORMS.map(platform => ({ ...platform, url: exact[platform.id] || links[platform.id], exact: Boolean(exact[platform.id]) }))
+    platforms: PLATFORMS.map(platform => {
+      if (exact[platform.id]) return { ...platform, url: exact[platform.id], exact: true, match: 'exact' };
+      const nearest = close[platform.id];
+      if (nearest) return { ...platform, url: nearest.url, exact: false, match: 'close', matchTitle: nearest.title, matchArtist: nearest.artist, score: Math.round(nearest.score * 100) / 100 };
+      return { ...platform, url: links[platform.id], exact: false, match: 'search' };
+    })
   };
 }

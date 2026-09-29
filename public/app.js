@@ -8,6 +8,9 @@ const result = document.querySelector('#result');
 const submitButton = document.querySelector('#submit-button');
 const LANGUAGE_KEY = 'tunebridge-language';
 const PREFERRED_KEY = 'tunebridge-preferred-platform';
+const HISTORY_ENABLED_KEY = 'tunebridge-history-enabled';
+const HISTORY_KEY = 'tunebridge-history';
+const HISTORY_LIMIT = 12;
 const installButton = document.querySelector('#install-button');
 const rememberChoice = document.querySelector('#remember-choice');
 const autoOpen = document.querySelector('#auto-open');
@@ -42,6 +45,7 @@ function applyLanguage(next) {
   if (submitButton.disabled) submitButton.textContent = t('submitting');
   if (lastResult) render(lastResult.data, lastResult.shareUrl);
   else document.title = t('pageTitle');
+  renderHistory();
   if (lastError) showError(lastError);
 }
 
@@ -70,6 +74,7 @@ async function loadSong(sourceUrl, updateHistory = true) {
     input.value = sourceUrl;
     lastResult = { data, shareUrl };
     render(data, shareUrl);
+    remember(sourceUrl, data);
     result.hidden = false;
     result.scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (error) {
@@ -116,9 +121,10 @@ function render(data, shareUrl) {
   nativeShare.onclick = () => navigator.share({ title: data.song.title, text: `${data.song.title} — ${data.song.artist}`, url: shareUrl }).catch(() => {});
   const list = document.querySelector('#platform-list');
   list.replaceChildren();
-  // The visitor's remembered app comes first, then direct links; whoever opened the page taps once.
+  // The visitor's remembered app comes first, then exact links, then closest matches, then searches.
   const preferred = storage.get(PREFERRED_KEY);
-  const rank = platform => (platform.id === preferred && platform.exact ? 0 : platform.exact ? 1 : 2);
+  const kind = platform => platform.match || (platform.exact ? 'exact' : 'search');
+  const rank = platform => (platform.id === preferred && platform.exact ? 0 : { exact: 1, close: 2, search: 3 }[kind(platform)]);
   for (const platform of [...data.platforms].sort((a, b) => rank(a) - rank(b))) {
     const item = document.createElement('a');
     item.className = 'platform';
@@ -140,9 +146,13 @@ function render(data, shareUrl) {
     name.className = 'platform-name';
     name.textContent = platform.name;
     if (rank(platform) === 0) item.classList.add('platform-preferred');
+    if (kind(platform) === 'close') item.classList.add('platform-close');
     const state = document.createElement('span');
     state.className = 'platform-state';
-    state.textContent = [rank(platform) === 0 ? t('preferred') : '', platform.exact ? t(isAlbum ? 'openAlbum' : 'openDirect') : t('searchPlatform')].filter(Boolean).join(' · ');
+    // A closest match names what it found, so the listener can tell whether it is the right song.
+    const closeName = [platform.matchTitle, platform.matchArtist].filter(Boolean).join(' — ');
+    const status = { exact: t(isAlbum ? 'openAlbum' : 'openDirect'), close: [t('closeMatch'), closeName].filter(Boolean).join(': '), search: t('searchPlatform') }[kind(platform)];
+    state.textContent = [rank(platform) === 0 ? t('preferred') : '', status].filter(Boolean).join(' · ');
     details.append(name, state);
     const arrow = document.createElement('span');
     arrow.className = 'platform-arrow';
@@ -153,7 +163,6 @@ function render(data, shareUrl) {
 }
 
 for (const button of document.querySelectorAll('[data-lang]')) button.addEventListener('click', () => applyLanguage(button.dataset.lang));
-applyLanguage(storedLanguage() || 'en');
 // A shared link opens straight in the visitor's remembered app, with a moment to change their mind.
 function startAutoOpen(data) {
   const preferred = storage.get(PREFERRED_KEY);
@@ -186,6 +195,83 @@ installButton.addEventListener('click', async () => {
 window.addEventListener('appinstalled', () => { installButton.hidden = true; });
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
 
+// "Search new song": back to an empty link field, ready for the next paste.
+document.querySelector('#new-search-button').addEventListener('click', () => {
+  clearTimeout(autoOpenTimer);
+  autoOpen.hidden = true;
+  result.hidden = true;
+  lastResult = null;
+  hideError();
+  input.value = '';
+  document.title = t('pageTitle');
+  history.pushState({}, '', '/');
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+  input.focus({ preventScroll: true });
+});
+
+// Search history is opt-in and stays in this browser; switching it off deletes it.
+const historyEnabled = document.querySelector('#history-enabled');
+const historyList = document.querySelector('#history-list');
+const historyClear = document.querySelector('#history-clear');
+
+function savedHistory() {
+  try { return JSON.parse(storage.get(HISTORY_KEY) || '[]').filter(entry => entry?.url && entry?.title); } catch { return []; }
+}
+
+function remember(sourceUrl, data) {
+  if (storage.get(HISTORY_ENABLED_KEY) !== '1') return;
+  const entry = { url: sourceUrl, title: data.song.title, artist: data.song.artist || '', artwork: data.song.artwork || '', kind: data.kind || 'track', at: Date.now() };
+  storage.set(HISTORY_KEY, JSON.stringify([entry, ...savedHistory().filter(item => item.url !== sourceUrl)].slice(0, HISTORY_LIMIT)));
+  renderHistory();
+}
+
+function renderHistory() {
+  const enabled = storage.get(HISTORY_ENABLED_KEY) === '1';
+  historyEnabled.checked = enabled;
+  const entries = enabled ? savedHistory() : [];
+  historyClear.hidden = !entries.length;
+  historyList.hidden = !enabled;
+  historyList.replaceChildren();
+  if (enabled && !entries.length) {
+    const empty = document.createElement('li');
+    empty.className = 'history-empty';
+    empty.textContent = t('historyEmpty');
+    historyList.append(empty);
+  }
+  for (const entry of entries) {
+    const item = document.createElement('li');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'history-item';
+    const art = document.createElement('span');
+    art.className = 'history-art';
+    if (entry.artwork) {
+      const img = document.createElement('img');
+      img.src = entry.artwork;
+      img.alt = '';
+      art.append(img);
+    } else art.textContent = '♫';
+    const text = document.createElement('span');
+    text.className = 'history-text';
+    const title = document.createElement('b');
+    title.textContent = entry.title;
+    const artist = document.createElement('small');
+    artist.textContent = [entry.kind === 'album' ? t('albumLabel') : '', entry.artist].filter(Boolean).join(' · ');
+    text.append(title, artist);
+    button.append(art, text);
+    button.addEventListener('click', () => { input.value = entry.url; loadSong(entry.url); });
+    item.append(button);
+    historyList.append(item);
+  }
+}
+
+historyEnabled.addEventListener('change', () => {
+  if (historyEnabled.checked) storage.set(HISTORY_ENABLED_KEY, '1');
+  else { storage.remove(HISTORY_ENABLED_KEY); storage.remove(HISTORY_KEY); }
+  renderHistory();
+});
+historyClear.addEventListener('click', () => { storage.remove(HISTORY_KEY); renderHistory(); });
+
 // For a link someone sent in WhatsApp and the like: copy it, open TuneBridge, one tap.
 const pasteButton = document.querySelector('#paste-button');
 pasteButton.hidden = !navigator.clipboard?.readText;
@@ -198,6 +284,8 @@ pasteButton.addEventListener('click', async () => {
   } catch { input.focus(); }
 });
 
+// Runs after every declaration above: applying the language also draws the history list.
+applyLanguage(storedLanguage() || 'en');
 form.addEventListener('submit', event => { event.preventDefault(); loadSong(input.value.trim()); });
 const params = new URLSearchParams(location.search);
 if (location.pathname === '/share') {

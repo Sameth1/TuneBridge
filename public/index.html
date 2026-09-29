@@ -39,17 +39,26 @@
         <p class="input-hint" data-i18n="inputHint">Songs and albums from Apple Music, Spotify, YouTube Music, YouTube, Deezer and SoundCloud</p>
       </form>
       <div id="form-error" class="error" role="alert" hidden></div>
+      <section class="history" aria-labelledby="history-title">
+        <div class="history-head">
+          <h2 id="history-title" data-i18n="historyTitle">Recent searches</h2>
+          <button type="button" id="history-clear" class="history-clear" data-i18n="historyClear" hidden>Clear</button>
+        </div>
+        <label class="history-toggle"><input type="checkbox" id="history-enabled"> <span data-i18n="historyToggle">Save my searches on this device</span></label>
+        <p class="history-note" data-i18n="historyNote">Kept only in this browser. Turning it off deletes the list.</p>
+        <ol id="history-list" class="history-list" hidden></ol>
+      </section>
       <div class="flow"><span>01 <b data-i18n="step1">Add the link</b></span><i></i><span>02 <b data-i18n="step2">Share one link</b></span><i></i><span>03 <b data-i18n="step3">Friends open it in their own app</b></span></div>
     </section>
     <section id="result" class="result" hidden>
-      <div class="result-heading"><span class="eyebrow" data-i18n="readyToShare">READY TO SHARE</span><a href="/" data-i18n="newSong">Add another song ↗</a></div>
+      <div class="result-heading"><span class="eyebrow" data-i18n="readyToShare">READY TO SHARE</span></div>
       <div class="song-card"><div id="artwork" class="artwork">♫</div><div class="song-meta"><span data-i18n="nowSharing">NOW SHARING</span><h2 id="song-title"></h2><p id="song-artist"></p><small id="song-album"></small><small id="song-duration"></small></div></div>
-      <div class="share-box"><div><span data-i18n="oneLink">ONE LINK, EVERY PLATFORM</span><p id="share-url"></p></div><button id="copy-button" type="button" data-i18n="copy">Copy link</button><button id="native-share-button" type="button" data-i18n="share" hidden>Share</button></div>
-      <div class="platform-heading"><h3 data-i18n="listenQuestion">How do you want to listen?</h3><p data-i18n="listenHint">Songs found directly are listed first.</p></div>
+      <div class="share-box"><div><span data-i18n="oneLink">ONE LINK, EVERY PLATFORM</span><p id="share-url"></p></div><button id="copy-button" type="button" data-i18n="copy">Copy link</button><button id="native-share-button" type="button" data-i18n="share" hidden>Share</button><button id="new-search-button" type="button" class="new-search-button" data-i18n="searchNew">Search new song</button></div>
+      <div class="platform-heading"><h3 data-i18n="listenQuestion">How do you want to listen?</h3><p data-i18n="listenHint">Exact matches first, then closest matches.</p></div>
       <div id="auto-open" class="auto-open" hidden><span id="auto-open-text"></span><button type="button" id="auto-open-cancel" data-i18n="autoCancel">Choose another app</button></div>
       <div id="platform-list" class="platform-list"></div>
       <label class="remember"><input type="checkbox" id="remember-choice"> <span data-i18n="rememberChoice">Open links in the app I pick next time</span></label>
-      <p class="result-note" data-i18n="resultNote">“Open the song” and “Open the album” links open its own page; just press play. “Search on platform” appears when it could not be found on that platform with certainty.</p>
+      <p class="result-note" data-i18n="resultNote">“Open the song” is the same recording; just press play. “Closest match” is the most similar song we found when names differ between platforms — check the name shown. “Search on platform” opens a search when nothing close enough was found.</p>
     </section>
   </main>
   <footer><span data-i18n="footerVersion">TuneBridge · First release</span><span data-i18n="footerTagline">Music without borders.</span></footer>

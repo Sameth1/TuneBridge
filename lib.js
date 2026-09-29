@@ -251,3 +251,106 @@ export function searchLinks(title, artist) {
     soundcloud: `https://soundcloud.com/search/sounds?q=${q}`
   };
 }
+
+// ---- Closest-match support: raw titles hidden in long names, and a similarity score. ----
+
+// Words that describe a video or an upload rather than the song ("Official Music Video - HD Version").
+const LABEL_WORDS = new Set(['official', 'music', 'video', 'audio', 'lyric', 'lyrics', 'hd', 'hq', '4k', '8k', 'version',
+  'clip', 'klip', 'videoklip', 'videoclip', 'visualizer', 'visualiser', 'mv', 'm', 'v', 'full', 'resmi', 'oficial',
+  'officiel', 'premiere', 'exclusive', 'new', 'teaser', 'with', 'subtitles', 'sözleri', 'şarkı', 'sozleri']);
+
+export function isLabelOnly(text) {
+  const words = normalize(text).split(' ').filter(Boolean);
+  return !words.length || words.every(word => LABEL_WORDS.has(word) || /^(19|20)\d\d$/.test(word));
+}
+
+function stripLabels(text) {
+  let cleaned = String(text || '').replace(/\s*[([{【]([^)\]}】]*)[)\]}】]/g, (match, inner) => (isLabelOnly(inner) ? '' : match));
+  const parts = cleaned.split(/\s+[-–—]\s+/);
+  while (parts.length > 1 && isLabelOnly(parts.at(-1))) parts.pop();
+  const words = parts.join(' - ').split(/\s+/);
+  while (words.length > 1 && isLabelOnly(words.at(-1))) words.pop();
+  return words.join(' ').trim();
+}
+
+const primaryArtist = artist => String(artist || '').split(/,|&| feat\.? | ft\.? | x /i)[0].trim();
+const sameArtistName = (a, b) => artistsOverlap(a, b) ||
+  (compactName(primaryArtist(a)).length >= 3 && compactName(b).includes(compactName(primaryArtist(a))));
+
+// Every plausible song name inside a title such as
+// "Nour El Ein | Official Music Video - HD Version | عمرو دياب - نور العين" → ["Nour El Ein", "نور العين", …].
+export function titleVariants(title, artist = '') {
+  const variants = [];
+  const push = value => {
+    const cleaned = stripLabels(value);
+    if (cleaned && !isLabelOnly(cleaned) && !variants.some(v => normalize(v) === normalize(cleaned))) variants.push(cleaned);
+  };
+  for (const segment of String(title || '').split(/\s+\|{1,2}\s+|\s+\/\/\s+/)) {
+    const cleaned = stripLabels(segment);
+    if (isLabelOnly(cleaned)) continue;
+    const split = splitArtistTitle(cleaned);
+    if (!split) push(cleaned);
+    else if (sameArtistName(artist, split.artist)) push(split.title);
+    else if (sameArtistName(artist, split.title)) push(split.artist);
+    else { push(split.title); push(cleaned); }
+  }
+  // Plain forms: without bracketed notes or a featured artist.
+  for (const variant of [...variants]) {
+    push(variant.replace(/\s*[([{【].*?[)\]}】]/g, ''));
+    push(variant.replace(/\s+(feat\.?|ft\.?|featuring)\s.*$/i, ''));
+  }
+  return variants.length ? variants : [String(title || '')];
+}
+
+function ratio(a, b) {
+  if (!a || !b) return 0;
+  return 1 - editDistance(a, b) / Math.max(a.length, b.length);
+}
+
+// 1 for the same name; tolerant of spelling ("Nour El Ein" / "Nour El Ain") and of extra words.
+export function titleSimilarity(first, second) {
+  const a = normalize(first);
+  const b = normalize(second);
+  if (!a || !b) return 0;
+  if (a === b) return 1;
+  const aw = a.split(' ');
+  const bw = b.split(' ');
+  const common = aw.filter(word => bw.includes(word)).length;
+  const dice = (2 * common) / (aw.length + bw.length);
+  const contained = aw.every(word => bw.includes(word)) || bw.every(word => aw.includes(word)) ? 0.85 : 0;
+  return Math.max(dice, contained, ratio(compactName(first), compactName(second)));
+}
+
+function artistSimilarity(first, second) {
+  if (!first || !second) return 0.5;
+  if (sameArtistName(first, second) || sameArtistName(second, first)) return 1;
+  return ratio(compactName(primaryArtist(first)), compactName(primaryArtist(second)));
+}
+
+// How alike two recordings look, 0–1. A different version (live, remix…) never scores.
+export function matchScore(source, candidate) {
+  if (!candidate?.title) return { score: 0, title: 0, artist: 0 };
+  if (source.isrc && candidate.isrc && source.isrc === candidate.isrc) return { score: 1, title: 1, artist: 1 };
+  const variants = source.titleVariants?.length ? source.titleVariants : [source.title];
+  const title = Math.max(0, ...variants.map(variant =>
+    (versionTags(variant) === versionTags(candidate.title) ? titleSimilarity(variant, candidate.title) : 0)));
+  const artist = artistSimilarity(source.artist, candidate.artist);
+  const parts = [[title, 0.5], [artist, 0.3]];
+  if (source.duration && candidate.duration) {
+    const gap = Math.abs(source.duration - candidate.duration) / 1000;
+    // A music video's length includes intros and outros: close lengths still help, far ones say nothing.
+    if (source.durationReliable !== false) parts.push([Math.max(0, 1 - gap / 30), 0.2]);
+    else if (gap <= 120) parts.push([1 - gap / 240, 0.2]);
+  }
+  const weight = parts.reduce((sum, [, w]) => sum + w, 0);
+  return { score: parts.reduce((sum, [value, w]) => sum + value * w, 0) / weight, title, artist };
+}
+
+// The best-scoring candidate that is clearly the same song under another name, or null.
+export function selectClosest(source, candidates, minimum = 0.78) {
+  return candidates
+    .filter(candidate => candidate?.url)
+    .map(candidate => ({ candidate, ...matchScore(source, candidate) }))
+    .filter(entry => entry.score >= minimum && entry.title >= 0.72 && entry.artist >= 0.6)
+    .sort((a, b) => b.score - a.score)[0] || null;
+}

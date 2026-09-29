@@ -34,7 +34,7 @@ async function cachedItunes(url) {
 }
 
 export function appleSong(track) {
-  return { title: track.trackName, artist: track.artistName, album: track.collectionName, duration: track.trackTimeMillis, isrc: null, url: cleanTrackUrl('apple', track.trackViewUrl), track };
+  return { title: track.trackName, artist: track.artistName, album: track.collectionName, duration: track.trackTimeMillis, isrc: null, artwork: track.artworkUrl100?.replace('100x100bb', '300x300bb') || null, url: cleanTrackUrl('apple', track.trackViewUrl), track };
 }
 
 export function appleAlbum(collection, country = 'us') {
