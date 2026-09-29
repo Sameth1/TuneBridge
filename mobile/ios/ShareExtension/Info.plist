@@ -22,7 +22,7 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<!-- The public TuneBridge site whose /share page the extension shows. -->
 	<key>TuneBridgeURL</key>
-	<string>https://tunebridge-nine.vercel.app</string>
+	<string>https://tunebridgeapp.com</string>
 	<key>NSExtension</key>
 	<dict>
 		<key>NSExtensionPointIdentifier</key>
