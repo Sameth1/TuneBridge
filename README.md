@@ -114,6 +114,10 @@ Spotify credentials improve possible direct Spotify matches but are **not requir
 
 Each item in `platforms` contains `id`, `name`, `url`, and `exact`. **`exact: true` means a direct track URL was selected**, while `false` means the URL opens a search page. The browser UI uses the visitor's language region when available.
 
+## Deploying on Vercel
+
+`vercel.json` serves `public/` as static files and routes `/api/*`, `/s` and `/share` to one Node function (`api/index.js`, which reuses the handler in `server.js`). No build step is needed. Set `PUBLIC_BASE_URL` to the production origin and `MUSICBRAINZ_CONTACT` in the project's environment variables; the optional keys from *Configuration* go there too.
+
 ## Public deployment and sharing
 
 To send a TuneBridge URL to another person, deploy the Node server on a publicly reachable **HTTPS** origin, set `PUBLIC_BASE_URL` to that origin, and use that address for generated `/s` links. A GitHub repository by itself does not host this server. The app makes outbound requests to music catalogs, MusicBrainz, and image CDNs, so the host needs network access. Protect a public instance with appropriate request limits and monitoring before promoting it widely.

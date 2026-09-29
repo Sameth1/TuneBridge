@@ -1,7 +1,7 @@
 import http from 'node:http';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { resolveMusicUrl } from './resolve.js';
 import { parseMusicUrl, isShortMusicLink, UserError } from './lib.js';
 
@@ -27,9 +27,12 @@ function escapeHTML(value) {
   return String(value || '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
 }
 
-const server = http.createServer(async (req, res) => {
+// One request handler for both `node server.js` and Vercel's function (api/index.js).
+export async function handler(req, res) {
   try {
-    const base = `http://${req.headers.host || 'localhost'}`;
+    // Behind Vercel's proxy the original scheme arrives in x-forwarded-proto.
+    const scheme = String(req.headers['x-forwarded-proto'] || 'http').split(',')[0];
+    const base = `${scheme}://${req.headers.host || 'localhost'}`;
     const url = new URL(req.url, base);
     if (url.pathname === '/api/resolve') {
       if (req.method !== 'GET') return respond(res, 405, { error: 'Method not allowed' });
@@ -71,7 +74,7 @@ const server = http.createServer(async (req, res) => {
     if (error.code === 'ENOENT') return respond(res, 404, { error: 'Not found' });
     respond(res, 500, { code: 'server_error', error: 'Server error.' });
   }
-});
+}
 
 // Catalog and network failures are not shown verbatim; the browser gets a generic, translatable code.
 function errorBody(error) {
@@ -83,4 +86,6 @@ function respond(res, status, data) {
   res.end(JSON.stringify(data));
 }
 
-server.listen(port, () => console.log(`TuneBridge: http://localhost:${port}`));
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  http.createServer(handler).listen(port, () => console.log(`TuneBridge: http://localhost:${port}`));
+}
