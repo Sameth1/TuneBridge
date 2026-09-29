@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const source = path.join(here, '..', 'public');
 const target = path.join(here, 'www');
-const server = (process.env.TUNEBRIDGE_URL || 'https://tunebridge-nine.vercel.app').replace(/\/$/, '');
+const server = (process.env.TUNEBRIDGE_URL || 'https://tunebridgeapp.com').replace(/\/$/, '');
 
 await fs.rm(target, { recursive: true, force: true });
 await fs.cp(source, target, { recursive: true });
