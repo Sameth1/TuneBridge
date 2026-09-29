@@ -1,0 +1,22 @@
+{
+  "name": "tunebridge-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "App Store and Google Play shell for TuneBridge (Capacitor).",
+  "scripts": {
+    "build": "node build-www.mjs",
+    "sync": "npm run build && npx cap sync",
+    "android:debug": "npm run sync && cd android && ./gradlew assembleDebug",
+    "android:bundle": "npm run sync && cd android && ./gradlew bundleRelease"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/app": "^8.1.1",
+    "@capacitor/core": "^8.5.2",
+    "@capacitor/ios": "^8.5.2"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.2"
+  }
+}

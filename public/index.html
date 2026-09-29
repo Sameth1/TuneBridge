@@ -12,6 +12,7 @@
   <meta name="description" content="Share a song or album once and let everyone open it in their own music app.">
   <title>TuneBridge — Music in everyone’s app</title>
   <link rel="stylesheet" href="/style.css">
+  <script src="/config.js"></script>
   <script type="module" src="/app.js"></script>
 </head>
 <body>
@@ -42,11 +43,16 @@
       <section class="history" aria-labelledby="history-title">
         <div class="history-head">
           <h2 id="history-title" data-i18n="historyTitle">Recent searches</h2>
-          <button type="button" id="history-clear" class="history-clear" data-i18n="historyClear" hidden>Clear</button>
+          <label class="history-toggle"><span data-i18n="historyToggle">Save my searches on this device</span><input type="checkbox" id="history-enabled" role="switch"></label>
         </div>
-        <label class="history-toggle"><input type="checkbox" id="history-enabled"> <span data-i18n="historyToggle">Save my searches on this device</span></label>
-        <p class="history-note" data-i18n="historyNote">Kept only in this browser. Turning it off deletes the list.</p>
+        <p class="history-note" data-i18n="historyNote">Kept only in this browser.</p>
         <ol id="history-list" class="history-list" hidden></ol>
+        <div id="history-actions" class="history-actions" hidden>
+          <button type="button" id="history-select" data-i18n="historySelect">Select</button>
+          <button type="button" id="history-delete-selected" class="danger" hidden disabled></button>
+          <button type="button" id="history-delete-all" class="danger" data-i18n="historyDeleteAll" hidden>Delete all</button>
+          <button type="button" id="history-done" data-i18n="historyDone" hidden>Done</button>
+        </div>
       </section>
       <div class="flow"><span>01 <b data-i18n="step1">Add the link</b></span><i></i><span>02 <b data-i18n="step2">Share one link</b></span><i></i><span>03 <b data-i18n="step3">Friends open it in their own app</b></span></div>
     </section>
@@ -61,6 +67,6 @@
       <p class="result-note" data-i18n="resultNote">“Open the song” is the same recording; just press play. “Closest match” is the most similar song we found when names differ between platforms — check the name shown. “Search on platform” opens a search when nothing close enough was found.</p>
     </section>
   </main>
-  <footer><span data-i18n="footerVersion">TuneBridge · First release</span><span data-i18n="footerTagline">Music without borders.</span></footer>
+  <footer><span data-i18n="footerVersion">TuneBridge · First release</span><a href="/privacy.html" data-i18n="privacy">Privacy</a><span data-i18n="footerTagline">Music without borders.</span></footer>
 </body>
 </html>

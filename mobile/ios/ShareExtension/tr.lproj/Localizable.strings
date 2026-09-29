@@ -1,0 +1,4 @@
+/* Paylaşım eklentisi. */
+"share.preparing" = "Şarkı aranıyor…";
+"share.noLink" = "Paylaştığın içerikte müzik bağlantısı bulunamadı.";
+"share.close" = "Bitti";

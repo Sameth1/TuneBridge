@@ -1,0 +1,4 @@
+/* Share extension. */
+"share.preparing" = "Finding the song…";
+"share.noLink" = "No music link was found in what you shared.";
+"share.close" = "Done";

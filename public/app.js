@@ -7,6 +7,10 @@ const errorBox = document.querySelector('#form-error');
 const result = document.querySelector('#result');
 const submitButton = document.querySelector('#submit-button');
 const LANGUAGE_KEY = 'tunebridge-language';
+// In the mobile app the page runs locally, so the API and the shared links point at the public site.
+const CONFIG = window.TUNEBRIDGE || {};
+const API_BASE = (CONFIG.apiBase || '').replace(/\/$/, '');
+const PUBLIC_BASE = (CONFIG.publicBase || location.origin).replace(/\/$/, '');
 const PREFERRED_KEY = 'tunebridge-preferred-platform';
 const HISTORY_ENABLED_KEY = 'tunebridge-history-enabled';
 const HISTORY_KEY = 'tunebridge-history';
@@ -66,11 +70,12 @@ async function loadSong(sourceUrl, updateHistory = true) {
   submitButton.textContent = t('submitting');
   try {
     const localeCountry = navigator.language.match(/[-_]([A-Za-z]{2})$/)?.[1]?.toLowerCase() || 'us';
-    const response = await fetch(`/api/resolve?url=${encodeURIComponent(sourceUrl)}&country=${localeCountry}`);
+    const response = await fetch(`${API_BASE}/api/resolve?url=${encodeURIComponent(sourceUrl)}&country=${localeCountry}`);
     const data = await response.json();
     if (!response.ok) throw Object.assign(new Error(data.error || ''), { code: data.code || 'resolve_failed' });
-    const shareUrl = new URL(`/s?url=${encodeURIComponent(sourceUrl)}`, location.origin).href;
-    if (updateHistory) history.pushState({}, '', shareUrl);
+    const sharePath = `/s?url=${encodeURIComponent(sourceUrl)}`;
+    const shareUrl = `${PUBLIC_BASE}${sharePath}`;
+    if (updateHistory) history.pushState({}, '', sharePath);
     input.value = sourceUrl;
     lastResult = { data, shareUrl };
     render(data, shareUrl);
@@ -129,8 +134,11 @@ function render(data, shareUrl) {
     const item = document.createElement('a');
     item.className = 'platform';
     item.href = platform.url;
-    item.target = '_blank';
-    item.rel = 'noopener noreferrer';
+    // In the mobile app a same-window link lets the phone hand it to Spotify, YouTube and the rest.
+    if (!CONFIG.app) {
+      item.target = '_blank';
+      item.rel = 'noopener noreferrer';
+    }
     // With "open in the app I pick" ticked, the tapped platform becomes the default for shared links.
     item.addEventListener('click', () => { if (rememberChoice.checked) storage.set(PREFERRED_KEY, platform.id); });
     const mark = document.createElement('span');
@@ -193,7 +201,7 @@ installButton.addEventListener('click', async () => {
   installButton.hidden = true;
 });
 window.addEventListener('appinstalled', () => { installButton.hidden = true; });
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+if ('serviceWorker' in navigator && !CONFIG.app) navigator.serviceWorker.register('/sw.js').catch(() => {});
 
 // "Search new song": back to an empty link field, ready for the next paste.
 document.querySelector('#new-search-button').addEventListener('click', () => {
@@ -209,19 +217,27 @@ document.querySelector('#new-search-button').addEventListener('click', () => {
   input.focus({ preventScroll: true });
 });
 
-// Search history is opt-in and stays in this browser; switching it off deletes it.
+// Search history is opt-in and stays in this browser. Deleting everything (or switching saving off,
+// which deletes the list) asks first; "Select" deletes chosen entries only.
 const historyEnabled = document.querySelector('#history-enabled');
 const historyList = document.querySelector('#history-list');
-const historyClear = document.querySelector('#history-clear');
+const historyActions = document.querySelector('#history-actions');
+const historySelect = document.querySelector('#history-select');
+const historyDeleteSelected = document.querySelector('#history-delete-selected');
+const historyDeleteAll = document.querySelector('#history-delete-all');
+const historyDone = document.querySelector('#history-done');
+let selecting = false;
+const selected = new Set();
 
 function savedHistory() {
   try { return JSON.parse(storage.get(HISTORY_KEY) || '[]').filter(entry => entry?.url && entry?.title); } catch { return []; }
 }
+const saveHistory = entries => (entries.length ? storage.set(HISTORY_KEY, JSON.stringify(entries)) : storage.remove(HISTORY_KEY));
 
 function remember(sourceUrl, data) {
   if (storage.get(HISTORY_ENABLED_KEY) !== '1') return;
   const entry = { url: sourceUrl, title: data.song.title, artist: data.song.artist || '', artwork: data.song.artwork || '', kind: data.kind || 'track', at: Date.now() };
-  storage.set(HISTORY_KEY, JSON.stringify([entry, ...savedHistory().filter(item => item.url !== sourceUrl)].slice(0, HISTORY_LIMIT)));
+  saveHistory([entry, ...savedHistory().filter(item => item.url !== sourceUrl)].slice(0, HISTORY_LIMIT));
   renderHistory();
 }
 
@@ -229,8 +245,15 @@ function renderHistory() {
   const enabled = storage.get(HISTORY_ENABLED_KEY) === '1';
   historyEnabled.checked = enabled;
   const entries = enabled ? savedHistory() : [];
-  historyClear.hidden = !entries.length;
+  if (!entries.length) { selecting = false; selected.clear(); }
+  for (const url of [...selected]) if (!entries.some(entry => entry.url === url)) selected.delete(url);
   historyList.hidden = !enabled;
+  historyList.classList.toggle('selecting', selecting);
+  historyActions.hidden = !entries.length;
+  historySelect.hidden = selecting;
+  historyDone.hidden = historyDeleteAll.hidden = historyDeleteSelected.hidden = !selecting;
+  historyDeleteSelected.disabled = !selected.size;
+  historyDeleteSelected.textContent = t('historyDeleteSelected')(selected.size);
   historyList.replaceChildren();
   if (enabled && !entries.length) {
     const empty = document.createElement('li');
@@ -243,6 +266,14 @@ function renderHistory() {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'history-item';
+    if (selecting) {
+      button.setAttribute('role', 'checkbox');
+      button.setAttribute('aria-checked', String(selected.has(entry.url)));
+      const tick = document.createElement('span');
+      tick.className = 'history-tick';
+      tick.textContent = selected.has(entry.url) ? '✓' : '';
+      button.append(tick);
+    }
     const art = document.createElement('span');
     art.className = 'history-art';
     if (entry.artwork) {
@@ -259,7 +290,11 @@ function renderHistory() {
     artist.textContent = [entry.kind === 'album' ? t('albumLabel') : '', entry.artist].filter(Boolean).join(' · ');
     text.append(title, artist);
     button.append(art, text);
-    button.addEventListener('click', () => { input.value = entry.url; loadSong(entry.url); });
+    button.addEventListener('click', () => {
+      if (!selecting) { input.value = entry.url; loadSong(entry.url); return; }
+      if (selected.has(entry.url)) selected.delete(entry.url); else selected.add(entry.url);
+      renderHistory();
+    });
     item.append(button);
     historyList.append(item);
   }
@@ -267,10 +302,21 @@ function renderHistory() {
 
 historyEnabled.addEventListener('change', () => {
   if (historyEnabled.checked) storage.set(HISTORY_ENABLED_KEY, '1');
-  else { storage.remove(HISTORY_ENABLED_KEY); storage.remove(HISTORY_KEY); }
+  else if (!savedHistory().length || confirm(t('historyConfirmOff'))) { storage.remove(HISTORY_ENABLED_KEY); storage.remove(HISTORY_KEY); }
   renderHistory();
 });
-historyClear.addEventListener('click', () => { storage.remove(HISTORY_KEY); renderHistory(); });
+historySelect.addEventListener('click', () => { selecting = true; renderHistory(); });
+historyDone.addEventListener('click', () => { selecting = false; selected.clear(); renderHistory(); });
+historyDeleteSelected.addEventListener('click', () => {
+  saveHistory(savedHistory().filter(entry => !selected.has(entry.url)));
+  selected.clear();
+  renderHistory();
+});
+historyDeleteAll.addEventListener('click', () => {
+  if (!confirm(t('historyConfirmAll'))) return;
+  storage.remove(HISTORY_KEY);
+  renderHistory();
+});
 
 // For a link someone sent in WhatsApp and the like: copy it, open TuneBridge, one tap.
 const pasteButton = document.querySelector('#paste-button');
@@ -287,8 +333,23 @@ pasteButton.addEventListener('click', async () => {
 // Runs after every declaration above: applying the language also draws the history list.
 applyLanguage(storedLanguage() || 'en');
 form.addEventListener('submit', event => { event.preventDefault(); loadSong(input.value.trim()); });
+
+// Mobile app: tunebridge://share?url=… (from the iPhone shortcut or a link) opens that song.
+const appPlugin = window.Capacitor?.Plugins?.App;
+if (CONFIG.app && appPlugin) {
+  const openAppUrl = value => {
+    let parsed;
+    try { parsed = new URL(value); } catch { return; }
+    if (parsed.protocol !== 'tunebridge:') return;
+    const link = sharedLink(parsed.searchParams);
+    if (link) { input.value = link; loadSong(link); }
+  };
+  appPlugin.addListener('appUrlOpen', event => openAppUrl(event.url));
+  appPlugin.getLaunchUrl().then(launch => launch?.url && openAppUrl(launch.url)).catch(() => {});
+}
 const params = new URLSearchParams(location.search);
-if (location.pathname === '/share') {
+// /share on the website; ?share=1 inside the mobile app, which serves only its own files.
+if (location.pathname === '/share' || params.has('share')) {
   // Opened from the phone's Share menu: this is the sender, so build the share page instead of auto-opening.
   const link = sharedLink(params);
   if (link) loadSong(link, false).then(() => history.replaceState({}, '', `/s?url=${encodeURIComponent(link)}`));

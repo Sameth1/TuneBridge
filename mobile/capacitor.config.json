@@ -1,0 +1,8 @@
+{
+  "appId": "com.tunebridgeapp.app",
+  "appName": "TuneBridge",
+  "webDir": "www",
+  "backgroundColor": "#0b0c12",
+  "android": { "backgroundColor": "#0b0c12" },
+  "ios": { "backgroundColor": "#0b0c12", "contentInset": "always" }
+}
