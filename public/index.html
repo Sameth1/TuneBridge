@@ -4,6 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0b0c12">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" type="image/svg+xml" href="/icons/app.svg">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="TuneBridge">
   <meta name="description" content="Share a song or album once and let everyone open it in their own music app.">
   <title>TuneBridge — Music in everyone’s app</title>
   <link rel="stylesheet" href="/style.css">
@@ -19,6 +24,7 @@
         <button type="button" data-lang="en" aria-pressed="true" lang="en">EN</button>
         <button type="button" data-lang="tr" aria-pressed="false" lang="tr">TR</button>
       </div>
+      <button type="button" id="install-button" class="install-button" data-i18n="install" hidden>Add to home screen</button>
     </div>
   </header>
   <main>
@@ -39,7 +45,9 @@
       <div class="song-card"><div id="artwork" class="artwork">♫</div><div class="song-meta"><span data-i18n="nowSharing">NOW SHARING</span><h2 id="song-title"></h2><p id="song-artist"></p><small id="song-album"></small><small id="song-duration"></small></div></div>
       <div class="share-box"><div><span data-i18n="oneLink">ONE LINK, EVERY PLATFORM</span><p id="share-url"></p></div><button id="copy-button" type="button" data-i18n="copy">Copy link</button><button id="native-share-button" type="button" data-i18n="share" hidden>Share</button></div>
       <div class="platform-heading"><h3 data-i18n="listenQuestion">How do you want to listen?</h3><p data-i18n="listenHint">Songs found directly are listed first.</p></div>
+      <div id="auto-open" class="auto-open" hidden><span id="auto-open-text"></span><button type="button" id="auto-open-cancel" data-i18n="autoCancel">Choose another app</button></div>
       <div id="platform-list" class="platform-list"></div>
+      <label class="remember"><input type="checkbox" id="remember-choice"> <span data-i18n="rememberChoice">Open links in the app I pick next time</span></label>
       <p class="result-note" data-i18n="resultNote">“Open the song” and “Open the album” links open its own page; just press play. “Search on platform” appears when it could not be found on that platform with certainty.</p>
     </section>
   </main>

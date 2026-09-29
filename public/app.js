@@ -1,4 +1,5 @@
 import { LANGUAGES, STRINGS } from './i18n.js';
+import { sharedLink } from './share.js';
 
 const form = document.querySelector('#link-form');
 const input = document.querySelector('#music-url');
@@ -6,20 +7,31 @@ const errorBox = document.querySelector('#form-error');
 const result = document.querySelector('#result');
 const submitButton = document.querySelector('#submit-button');
 const LANGUAGE_KEY = 'tunebridge-language';
+const PREFERRED_KEY = 'tunebridge-preferred-platform';
+const installButton = document.querySelector('#install-button');
+const rememberChoice = document.querySelector('#remember-choice');
+const autoOpen = document.querySelector('#auto-open');
 
 let language = 'en';
 let lastResult = null;
 let lastError = null;
+let autoOpenTimer = null;
+let installPrompt = null;
 
-function storedLanguage() {
-  try { return localStorage.getItem(LANGUAGE_KEY); } catch { return null; }
-}
+// Everything below is optional per-visitor convenience: private mode can refuse storage.
+const storage = {
+  get(key) { try { return localStorage.getItem(key); } catch { return null; } },
+  set(key, value) { try { localStorage.setItem(key, value); } catch { /* keep going without it */ } },
+  remove(key) { try { localStorage.removeItem(key); } catch { /* keep going without it */ } }
+};
+
+function storedLanguage() { return storage.get(LANGUAGE_KEY); }
 
 const t = key => STRINGS[language][key];
 
 function applyLanguage(next) {
   language = LANGUAGES.includes(next) ? next : 'en';
-  try { localStorage.setItem(LANGUAGE_KEY, language); } catch { /* Private mode: keep the choice for this visit only. */ }
+  storage.set(LANGUAGE_KEY, language);
   document.documentElement.lang = language;
   document.querySelector('meta[name="description"]').content = t('metaDescription');
   for (const element of document.querySelectorAll('[data-i18n]')) element.textContent = t(element.dataset.i18n);
@@ -110,6 +122,8 @@ function render(data, shareUrl) {
     item.href = platform.url;
     item.target = '_blank';
     item.rel = 'noopener noreferrer';
+    // With "open in the app I pick" ticked, the tapped platform becomes the default for shared links.
+    item.addEventListener('click', () => { if (rememberChoice.checked) storage.set(PREFERRED_KEY, platform.id); });
     const mark = document.createElement('span');
     mark.className = 'platform-mark';
     mark.style.background = platform.color;
@@ -136,6 +150,45 @@ function render(data, shareUrl) {
 
 for (const button of document.querySelectorAll('[data-lang]')) button.addEventListener('click', () => applyLanguage(button.dataset.lang));
 applyLanguage(storedLanguage() || 'en');
+// A shared link opens straight in the visitor's remembered app, with a moment to change their mind.
+function startAutoOpen(data) {
+  const preferred = storage.get(PREFERRED_KEY);
+  const platform = data.platforms.find(candidate => candidate.id === preferred && candidate.exact);
+  if (!platform) return;
+  const text = document.querySelector('#auto-open-text');
+  text.textContent = t('autoOpening')(platform.name);
+  autoOpen.hidden = false;
+  clearTimeout(autoOpenTimer);
+  autoOpenTimer = setTimeout(() => { location.href = platform.url; }, 1800);
+}
+
+document.querySelector('#auto-open-cancel').addEventListener('click', () => { clearTimeout(autoOpenTimer); autoOpen.hidden = true; });
+rememberChoice.checked = Boolean(storage.get(PREFERRED_KEY));
+rememberChoice.addEventListener('change', () => { if (!rememberChoice.checked) storage.remove(PREFERRED_KEY); });
+
+// "Add to home screen": Chrome offers it through beforeinstallprompt; the installed app then shows up in the Share menu.
+window.addEventListener('beforeinstallprompt', event => {
+  event.preventDefault();
+  installPrompt = event;
+  installButton.hidden = false;
+});
+installButton.addEventListener('click', async () => {
+  if (!installPrompt) return;
+  installPrompt.prompt();
+  await installPrompt.userChoice.catch(() => {});
+  installPrompt = null;
+  installButton.hidden = true;
+});
+window.addEventListener('appinstalled', () => { installButton.hidden = true; });
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+
 form.addEventListener('submit', event => { event.preventDefault(); loadSong(input.value.trim()); });
-const shared = new URLSearchParams(location.search).get('url');
-if (shared) loadSong(shared, false);
+const params = new URLSearchParams(location.search);
+if (location.pathname === '/share') {
+  // Opened from the phone's Share menu: this is the sender, so build the share page instead of auto-opening.
+  const link = sharedLink(params);
+  if (link) loadSong(link, false).then(() => history.replaceState({}, '', `/s?url=${encodeURIComponent(link)}`));
+  else { history.replaceState({}, '', '/'); showError('shareNoLink'); }
+} else if (params.get('url')) {
+  loadSong(params.get('url'), false).then(() => { if (lastResult) startAutoOpen(lastResult.data); });
+}

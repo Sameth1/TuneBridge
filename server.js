@@ -7,7 +7,7 @@ import { parseMusicUrl, isShortMusicLink, UserError } from './lib.js';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
 const port = Number(process.env.PORT || 3000);
-const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml' };
+const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
 const cache = new Map();
 
 async function cachedResolve(source, country = 'us') {
@@ -48,7 +48,8 @@ const server = http.createServer(async (req, res) => {
       }
       catch (error) { return respond(res, 400, errorBody(error)); }
     }
-    const file = url.pathname === '/' || url.pathname === '/s' ? '/index.html' : url.pathname;
+    // /share is the installed app's share-sheet entry; the page reads the shared text and moves on to /s.
+    const file = ['/', '/s', '/share'].includes(url.pathname) ? '/index.html' : url.pathname;
     const filename = path.resolve(root, `.${file}`);
     if (!filename.startsWith(root + path.sep)) return respond(res, 404, { error: 'Not found' });
     let content = await fs.readFile(filename);

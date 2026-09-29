@@ -50,6 +50,14 @@ YouTube Music search, YouTube's player and search endpoints and SoundCloud searc
 
 An album link is read for its title, artist, track count, year and first tracks. Deezer is matched first because its album record carries the UPC: with a UPC, Deezer and the MusicBrainz release for that barcode give exact album links (Spotify, Apple, YouTube album playlists). The remaining platforms are searched and must agree on title, edition (Deluxe, Remastered, Live… are different releases), artist and track count. Without Spotify credentials, the album is found through one of its tracks: the track's Spotify page names its album, which is then checked. YouTube Music albums are found the same way through a track's YouTube Music page.
 
+## Sharing from a phone
+
+Nobody needs an account, and the recipient needs nothing installed.
+
+- **Android (Chrome, Edge, Samsung Internet):** the site is an installable web app. After *Add to home screen* (the button in the header, or the browser menu), **TuneBridge appears in the phone's Share menu**. Sharing a song from Spotify, Apple Music, YouTube or any other app opens `/share`, which finds the link in the shared text, drops tracking parameters (`si`, `utm_*` …) and shows the TuneBridge page to send on.
+- **iPhone:** Safari does not let web apps join the Share menu. Two options: a Shortcuts shortcut with *Show in Share Sheet* on that opens `https://<your-domain>/share?url=` + *Shortcut Input* (no App Store needed), or the native Share Extension in `ios/` (needs an Apple Developer account to distribute).
+- **Recipient:** opens the shared link in any browser and taps their app. With *Open links in the app I pick next time* ticked, later TuneBridge links open straight in that app after a short “Opening in Spotify…” notice with a *Choose another app* button. The choice is kept only in that browser.
+
 ## Quick start
 
 Requirements: **Node.js 20+** and npm.
@@ -98,6 +106,7 @@ Spotify credentials improve possible direct Spotify matches but are **not requir
 | Endpoint | Description |
 | --- | --- |
 | `GET /` | Main web UI. |
+| `GET /share?url=…` or `?text=…` | Web Share Target entry of the installed app; forwards to `/s`. |
 | `GET /s?url=<encoded-track-url>` | Share page. Server injects Open Graph title, artist, artwork, and canonical URL when metadata resolves. |
 | `GET /api/check?url=<encoded-track-url>` | Validates a supported track URL. |
 | `GET /api/resolve?url=<encoded-track-url>&country=tr` | Returns song metadata and destination links. `country` is a two-letter catalog code; default is `us`. |
