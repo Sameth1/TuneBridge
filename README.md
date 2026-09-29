@@ -4,7 +4,7 @@
 
 TuneBridge turns a track URL from Apple Music, Spotify, YouTube Music, Deezer, or SoundCloud into one shareable page. The recipient chooses a service. When TuneBridge can identify the same recording with sufficient confidence, the button points to the **track itself**; otherwise it is clearly labeled as a search link. The interface is in English by default, with a Turkish option in the header; the choice is remembered in the browser.
 
-> **Status:** Working web MVP and an iOS Share Extension source scaffold. The iOS project has not been built or tested on a device. This repository does not include a hosted deployment; `localhost` share links work only on the computer running the server.
+> **Status:** Working web app deployed on Vercel, plus Android and iOS apps in `mobile/` (Capacitor). The Android app builds here; the iOS app and its Share Extension need a Mac with Xcode and have not been device-tested yet.
 
 ## Why it exists
 
@@ -17,7 +17,7 @@ A Spotify recipient should not have to transcribe an Apple Music song title and 
 - Shows direct track links only for matches supported by recording relationships or strict metadata comparison.
 - Falls back to a clearly marked platform search when a direct match is uncertain or unavailable.
 - Generates `/s?url=...` pages with Open Graph song metadata for sharing in messaging and social apps.
-- Includes browser copy/share actions and iOS app plus Share Extension source files.
+- Includes browser copy/share actions, an installable web app with a Share target, and Android and iOS apps that appear in the phone's Share menu.
 - Requires no database or account for the MVP.
 
 ### Platform coverage
@@ -56,7 +56,7 @@ An album link is read for its title, artist, track count, year and first tracks.
 Nobody needs an account, and the recipient needs nothing installed.
 
 - **Android (Chrome, Edge, Samsung Internet):** the site is an installable web app. After *Add to home screen* (the button in the header, or the browser menu), **TuneBridge appears in the phone's Share menu**. Sharing a song from Spotify, Apple Music, YouTube or any other app opens `/share`, which finds the link in the shared text, drops tracking parameters (`si`, `utm_*` …) and shows the TuneBridge page to send on.
-- **iPhone:** Safari does not let web apps join the Share menu. Two options: a Shortcuts shortcut with *Show in Share Sheet* on that opens `https://<your-domain>/share?url=` + *Shortcut Input* (no App Store needed), or the native Share Extension in `ios/` (needs an Apple Developer account to distribute).
+- **iPhone:** Safari does not let web apps join the Share menu. Two options: a Shortcuts shortcut with *Show in Share Sheet* on that opens `https://<your-domain>/share?url=` + *Shortcut Input* (no App Store needed), or the native Share Extension in `mobile/ios/ShareExtension` (needs an Apple Developer account to distribute).
 - **A plain Spotify/Apple/YouTube link received in WhatsApp or similar:** tapping it always opens that platform — the phone decides, and no website or app can take over another service's links. Instead, long-press the link and share it to TuneBridge (Android, or the iPhone shortcut), or copy it and use **Paste a copied link** on the home page. The recipient's remembered app is listed first and highlighted.
 - **Search history (opt-in):** *Save my searches on this device* keeps the last 12 lookups in that browser only; turning it off deletes them. *Search new song* clears the link field for the next paste.
 - **Recipient:** opens the shared link in any browser and taps their app. With *Open links in the app I pick next time* ticked, later TuneBridge links open straight in that app after a short “Opening in Spotify…” notice with a *Choose another app* button. The choice is kept only in that browser.
@@ -126,18 +126,9 @@ To send a TuneBridge URL to another person, deploy the Node server on a publicly
 
 The in-memory resolution cache lasts up to one hour; artistless results expire after 15 seconds so a temporary upstream failure can recover quickly. It is cleared when the process restarts.
 
-## iOS Share Extension scaffold
+## Android and iOS apps
 
-`ios/project.yml` is an XcodeGen project definition for an iOS 16+ app and Share Extension. The extension accepts a shared music URL, creates the hosted `/s?url=...` URL, and copies it to the clipboard. It is intended to appear in the iOS share sheet after the app is built and installed.
-
-To continue on a Mac:
-
-1. Deploy the web server and replace `YOUR_DOMAIN_HERE` in `ios/project.yml` and `ios/App/TuneBridgeApp.swift` with its HTTPS domain.
-2. Install Xcode and XcodeGen; run `xcodegen generate` from `ios/`.
-3. Set unique bundle identifiers and your Apple development team in Xcode.
-4. Build on a device, enable the TuneBridge share action, and test sharing from the supported music apps.
-
-The iOS files were authored on Windows and **have not been compiled or device-tested**. The share action currently copies the generated link; it does not post a message on the user's behalf.
+`mobile/` wraps the same page in native apps so TuneBridge appears in the phone's Share menu without an account: an Android share intent, an iOS Share Extension, and a `tunebridge://share?url=…` scheme for iPhone Shortcuts. Building, signing and the store checklist are in [`mobile/README.md`](mobile/README.md). The privacy policy the stores ask for is `public/privacy.html`.
 
 ## Repository structure
 
@@ -148,7 +139,8 @@ resolve.js          Platform metadata and candidate matching pipeline
 musicbrainz.js      MusicBrainz lookups and recording relationships
 artwork.js          Album cover comparison
 lib.js              URL parsing, normalization, matching, search URLs
-ios/                iOS app and Share Extension scaffold
+mobile/             Android and iOS apps (Capacitor) and the iOS Share Extension
+api/                Vercel function entry
 *.test.js           Node test runner tests
 ```
 
@@ -173,7 +165,7 @@ TuneBridge is an independent project and is not affiliated with the music platfo
 
 ## Localization
 
-The web UI is English by default with a Turkish switch; strings live in `public/i18n.js`. The iOS app and Share Extension use `en.lproj` (development language) and `tr.lproj` `Localizable.strings`; iOS follows the device language and offers Settings → TuneBridge → Language.
+The web UI is English by default with a Turkish switch; strings live in `public/i18n.js`. The apps show the same page, so they share those strings. The iOS Share Extension's own few strings are in `mobile/ios/ShareExtension/en.lproj` (development language) and `tr.lproj`, and both apps declare English and Turkish.
 
 ## Credits
 

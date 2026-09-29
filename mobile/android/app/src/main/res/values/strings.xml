@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">TuneBridge</string>
+    <string name="title_activity_main">TuneBridge</string>
+    <string name="package_name">com.tunebridgeapp.app</string>
+    <string name="custom_url_scheme">com.tunebridgeapp.app</string>
+</resources>

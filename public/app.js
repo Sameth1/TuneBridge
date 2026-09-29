@@ -7,6 +7,10 @@ const errorBox = document.querySelector('#form-error');
 const result = document.querySelector('#result');
 const submitButton = document.querySelector('#submit-button');
 const LANGUAGE_KEY = 'tunebridge-language';
+// In the mobile app the page runs locally, so the API and the shared links point at the public site.
+const CONFIG = window.TUNEBRIDGE || {};
+const API_BASE = (CONFIG.apiBase || '').replace(/\/$/, '');
+const PUBLIC_BASE = (CONFIG.publicBase || location.origin).replace(/\/$/, '');
 const PREFERRED_KEY = 'tunebridge-preferred-platform';
 const HISTORY_ENABLED_KEY = 'tunebridge-history-enabled';
 const HISTORY_KEY = 'tunebridge-history';
@@ -66,11 +70,12 @@ async function loadSong(sourceUrl, updateHistory = true) {
   submitButton.textContent = t('submitting');
   try {
     const localeCountry = navigator.language.match(/[-_]([A-Za-z]{2})$/)?.[1]?.toLowerCase() || 'us';
-    const response = await fetch(`/api/resolve?url=${encodeURIComponent(sourceUrl)}&country=${localeCountry}`);
+    const response = await fetch(`${API_BASE}/api/resolve?url=${encodeURIComponent(sourceUrl)}&country=${localeCountry}`);
     const data = await response.json();
     if (!response.ok) throw Object.assign(new Error(data.error || ''), { code: data.code || 'resolve_failed' });
-    const shareUrl = new URL(`/s?url=${encodeURIComponent(sourceUrl)}`, location.origin).href;
-    if (updateHistory) history.pushState({}, '', shareUrl);
+    const sharePath = `/s?url=${encodeURIComponent(sourceUrl)}`;
+    const shareUrl = `${PUBLIC_BASE}${sharePath}`;
+    if (updateHistory) history.pushState({}, '', sharePath);
     input.value = sourceUrl;
     lastResult = { data, shareUrl };
     render(data, shareUrl);
@@ -129,8 +134,11 @@ function render(data, shareUrl) {
     const item = document.createElement('a');
     item.className = 'platform';
     item.href = platform.url;
-    item.target = '_blank';
-    item.rel = 'noopener noreferrer';
+    // In the mobile app a same-window link lets the phone hand it to Spotify, YouTube and the rest.
+    if (!CONFIG.app) {
+      item.target = '_blank';
+      item.rel = 'noopener noreferrer';
+    }
     // With "open in the app I pick" ticked, the tapped platform becomes the default for shared links.
     item.addEventListener('click', () => { if (rememberChoice.checked) storage.set(PREFERRED_KEY, platform.id); });
     const mark = document.createElement('span');
@@ -193,7 +201,7 @@ installButton.addEventListener('click', async () => {
   installButton.hidden = true;
 });
 window.addEventListener('appinstalled', () => { installButton.hidden = true; });
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
+if ('serviceWorker' in navigator && !CONFIG.app) navigator.serviceWorker.register('/sw.js').catch(() => {});
 
 // "Search new song": back to an empty link field, ready for the next paste.
 document.querySelector('#new-search-button').addEventListener('click', () => {
@@ -325,8 +333,23 @@ pasteButton.addEventListener('click', async () => {
 // Runs after every declaration above: applying the language also draws the history list.
 applyLanguage(storedLanguage() || 'en');
 form.addEventListener('submit', event => { event.preventDefault(); loadSong(input.value.trim()); });
+
+// Mobile app: tunebridge://share?url=… (from the iPhone shortcut or a link) opens that song.
+const appPlugin = window.Capacitor?.Plugins?.App;
+if (CONFIG.app && appPlugin) {
+  const openAppUrl = value => {
+    let parsed;
+    try { parsed = new URL(value); } catch { return; }
+    if (parsed.protocol !== 'tunebridge:') return;
+    const link = sharedLink(parsed.searchParams);
+    if (link) { input.value = link; loadSong(link); }
+  };
+  appPlugin.addListener('appUrlOpen', event => openAppUrl(event.url));
+  appPlugin.getLaunchUrl().then(launch => launch?.url && openAppUrl(launch.url)).catch(() => {});
+}
 const params = new URLSearchParams(location.search);
-if (location.pathname === '/share') {
+// /share on the website; ?share=1 inside the mobile app, which serves only its own files.
+if (location.pathname === '/share' || params.has('share')) {
   // Opened from the phone's Share menu: this is the sender, so build the share page instead of auto-opening.
   const link = sharedLink(params);
   if (link) loadSong(link, false).then(() => history.replaceState({}, '', `/s?url=${encodeURIComponent(link)}`));

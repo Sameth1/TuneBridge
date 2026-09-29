@@ -1,5 +1,0 @@
-/* Main app. English is the development language and the fallback for every device language without its own translation. */
-"app.tagline" = "Share a song once. Everyone opens it in their own music app.";
-"app.pastePlaceholder" = "Paste a song link";
-"app.createLink" = "Create link";
-"app.shareHint" = "You can also tap Share → TuneBridge in Apple Music, Spotify, YouTube and other music apps.";
