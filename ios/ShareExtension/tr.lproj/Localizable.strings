@@ -1,0 +1,6 @@
+/* Paylaşım eklentisi. */
+"share.preparing" = "Şarkı bağlantısı hazırlanıyor…";
+"share.copyButton" = "Ortak bağlantıyı kopyala";
+"share.noLink" = "Bu paylaşımda bağlantı bulunamadı.";
+"share.unsupported" = "Desteklenen bir müzik bağlantısı bulunamadı.";
+"share.ready" = "Hazır. Bağlantıyı kopyalayıp WhatsApp veya başka bir uygulamada paylaş.";

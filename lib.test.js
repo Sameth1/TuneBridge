@@ -8,8 +8,12 @@ test('Apple Music album links use the song id in i=', () => {
   assert.equal(parsed.id, '987654');
 });
 
-test('rejects unsupported and album links', () => {
-  assert.throws(() => parseMusicUrl('https://music.apple.com/tr/album/example/123456'));
+test('recognises album links and rejects unsupported hosts', () => {
+  assert.deepEqual(parseMusicUrl('https://music.apple.com/tr/album/example/123456'), { platform: 'apple', kind: 'album', id: '123456', url: 'https://music.apple.com/tr/album/123456' });
+  assert.equal(parseMusicUrl('https://open.spotify.com/album/2noRn2Aes5aoNVsU6iWThc?si=x').kind, 'album');
+  assert.equal(parseMusicUrl('https://www.deezer.com/tr/album/302127').url, 'https://www.deezer.com/album/302127');
+  assert.equal(parseMusicUrl('https://music.youtube.com/playlist?list=OLAK5uy_mz6eafmqdRHSaR4IwG0ll6J6rgv0_ZpGw').kind, 'album');
+  assert.throws(() => parseMusicUrl('https://www.youtube.com/playlist?list=PL1234567890'));
   assert.throws(() => parseMusicUrl('https://example.com/music.apple.com/tr/song/123456'));
 });
 
@@ -28,5 +32,6 @@ test('does not confuse a live recording with the studio version', () => {
 
 test('search links preserve non-Latin song names', () => {
   const links = searchLinks('أغنية', 'فنان');
-  assert.equal(new URL(links.youtube).searchParams.get('q'), 'أغنية فنان');
+  assert.equal(new URL(links.youtubeMusic).searchParams.get('q'), 'أغنية فنان');
+  assert.equal(new URL(links.youtube).searchParams.get('search_query'), 'أغنية فنان');
 });

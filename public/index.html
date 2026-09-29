@@ -1,42 +1,66 @@
 <!doctype html>
-<html lang="tr">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0b0c12">
-  <meta name="description" content="Bir şarkıyı herkes kendi müzik uygulamasında açsın.">
-  <title>TuneBridge — Müzik herkesin uygulamasında</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" type="image/svg+xml" href="/icons/app.svg">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="TuneBridge">
+  <meta name="description" content="Share a song or album once and let everyone open it in their own music app.">
+  <title>TuneBridge — Music in everyone’s app</title>
   <link rel="stylesheet" href="/style.css">
-  <script src="/app.js" defer></script>
+  <script type="module" src="/app.js"></script>
 </head>
 <body>
   <div class="glow glow-one"></div><div class="glow glow-two"></div>
   <header class="site-header">
-    <a class="brand" href="/" aria-label="TuneBridge ana sayfa"><span class="brand-icon">↗</span> Tune<span>Bridge</span></a>
-    <span class="header-note">Müziğin ortak adresi</span>
+    <a class="brand" href="/" aria-label="TuneBridge home" data-i18n-aria="homeLabel"><span class="brand-icon">↗</span> Tune<span>Bridge</span></a>
+    <div class="header-end">
+      <span class="header-note" data-i18n="headerNote">The shared address for music</span>
+      <div class="language-switch" role="group" aria-label="Language" data-i18n-aria="languageLabel">
+        <button type="button" data-lang="en" aria-pressed="true" lang="en">EN</button>
+        <button type="button" data-lang="tr" aria-pressed="false" lang="tr">TR</button>
+      </div>
+      <button type="button" id="install-button" class="install-button" data-i18n="install" hidden>Add to home screen</button>
+    </div>
   </header>
   <main>
     <section class="hero" id="hero">
-      <div class="eyebrow"><span class="eyebrow-dot"></span> PLATFORM SINIRLARINI KALDIR</div>
-      <h1>Bir şarkı.<br><em>Herkesin</em> uygulamasında.</h1>
-      <p class="intro">Apple Music’ten paylaş, arkadaşın Spotify’da açsın. Şarkıyı yeniden aramaya, adını başka alfabeyle yazmaya gerek yok.</p>
+      <div class="eyebrow"><span class="eyebrow-dot"></span> <span data-i18n="eyebrow">NO MORE PLATFORM WALLS</span></div>
+      <h1 data-i18n-html="headline">One song.<br><em>Everyone’s</em> app.</h1>
+      <p class="intro" data-i18n="intro">Share from Apple Music, and your friend opens it on Spotify. No searching again, no retyping a title written in another alphabet.</p>
       <form id="link-form" class="link-form">
-        <label for="music-url">Şarkı bağlantısını yapıştır</label>
-        <div class="input-wrap"><span class="input-icon">↗</span><input id="music-url" type="url" inputmode="url" autocomplete="url" spellcheck="false" placeholder="https://music.apple.com/…" required><button type="submit" id="submit-button">Bağlantı oluştur <span>→</span></button></div>
-        <p class="input-hint">Apple Music, Spotify, YouTube Music, Deezer ve SoundCloud bağlantıları</p>
+        <label for="music-url" data-i18n="inputLabel">Paste a song or album link</label>
+        <div class="input-wrap"><span class="input-icon">↗</span><input id="music-url" type="url" inputmode="url" autocomplete="url" spellcheck="false" placeholder="https://music.apple.com/…" required><button type="submit" id="submit-button" data-i18n-html="submit">Create link <span>→</span></button></div>
+        <button type="button" id="paste-button" class="paste-button" data-i18n="paste" hidden>Paste a copied link</button>
+        <p class="input-hint" data-i18n="inputHint">Songs and albums from Apple Music, Spotify, YouTube Music, YouTube, Deezer and SoundCloud</p>
       </form>
       <div id="form-error" class="error" role="alert" hidden></div>
-      <div class="flow"><span>01 <b>Bağlantıyı ekle</b></span><i></i><span>02 <b>Ortak bağlantıyı paylaş</b></span><i></i><span>03 <b>Arkadaşın kendi uygulamasında açsın</b></span></div>
+      <section class="history" aria-labelledby="history-title">
+        <div class="history-head">
+          <h2 id="history-title" data-i18n="historyTitle">Recent searches</h2>
+          <button type="button" id="history-clear" class="history-clear" data-i18n="historyClear" hidden>Clear</button>
+        </div>
+        <label class="history-toggle"><input type="checkbox" id="history-enabled"> <span data-i18n="historyToggle">Save my searches on this device</span></label>
+        <p class="history-note" data-i18n="historyNote">Kept only in this browser. Turning it off deletes the list.</p>
+        <ol id="history-list" class="history-list" hidden></ol>
+      </section>
+      <div class="flow"><span>01 <b data-i18n="step1">Add the link</b></span><i></i><span>02 <b data-i18n="step2">Share one link</b></span><i></i><span>03 <b data-i18n="step3">Friends open it in their own app</b></span></div>
     </section>
     <section id="result" class="result" hidden>
-      <div class="result-heading"><span class="eyebrow">PAYLAŞIMA HAZIR</span><a href="/">Yeni şarkı ekle ↗</a></div>
-      <div class="song-card"><div id="artwork" class="artwork">♫</div><div class="song-meta"><span>ŞİMDİ PAYLAŞILIYOR</span><h2 id="song-title"></h2><p id="song-artist"></p><small id="song-album"></small><small id="song-duration"></small></div></div>
-      <div class="share-box"><div><span>TEK BAĞLANTI, TÜM PLATFORMLAR</span><p id="share-url"></p></div><button id="copy-button" type="button">Bağlantıyı kopyala</button><button id="native-share-button" type="button" hidden>Paylaş</button></div>
-      <div class="platform-heading"><h3>Nasıl dinlemek istersin?</h3><p>Doğrudan bulunan şarkılar üstte gösterilir.</p></div>
+      <div class="result-heading"><span class="eyebrow" data-i18n="readyToShare">READY TO SHARE</span></div>
+      <div class="song-card"><div id="artwork" class="artwork">♫</div><div class="song-meta"><span data-i18n="nowSharing">NOW SHARING</span><h2 id="song-title"></h2><p id="song-artist"></p><small id="song-album"></small><small id="song-duration"></small></div></div>
+      <div class="share-box"><div><span data-i18n="oneLink">ONE LINK, EVERY PLATFORM</span><p id="share-url"></p></div><button id="copy-button" type="button" data-i18n="copy">Copy link</button><button id="native-share-button" type="button" data-i18n="share" hidden>Share</button><button id="new-search-button" type="button" class="new-search-button" data-i18n="searchNew">Search new song</button></div>
+      <div class="platform-heading"><h3 data-i18n="listenQuestion">How do you want to listen?</h3><p data-i18n="listenHint">Exact matches first, then closest matches.</p></div>
+      <div id="auto-open" class="auto-open" hidden><span id="auto-open-text"></span><button type="button" id="auto-open-cancel" data-i18n="autoCancel">Choose another app</button></div>
       <div id="platform-list" class="platform-list"></div>
-      <p class="result-note">“Platformda ara” yazan bağlantılar kesin eşleşme değildir. Yanlış şarkıyı açmamak için arama sonucunu sen seçersin.</p>
+      <label class="remember"><input type="checkbox" id="remember-choice"> <span data-i18n="rememberChoice">Open links in the app I pick next time</span></label>
+      <p class="result-note" data-i18n="resultNote">“Open the song” is the same recording; just press play. “Closest match” is the most similar song we found when names differ between platforms — check the name shown. “Search on platform” opens a search when nothing close enough was found.</p>
     </section>
   </main>
-  <footer><span>TuneBridge · İlk sürüm</span><span>Müzik sınır tanımasın.</span></footer>
+  <footer><span data-i18n="footerVersion">TuneBridge · First release</span><span data-i18n="footerTagline">Music without borders.</span></footer>
 </body>
 </html>

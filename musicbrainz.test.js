@@ -18,8 +18,8 @@ test('accepts only song relations from a recording containing the source Spotify
     { url: { resource: 'https://music.youtube.com/watch?v=4D7u5KF7SP8' } }
   ] };
   const links = extractLinks(recording, spotify, 'gb');
-  assert.equal(links.apple, 'https://music.apple.com/gb/song/get-lucky/1673536443');
-  assert.equal(links.youtube, 'https://music.youtube.com/watch?v=4D7u5KF7SP8');
+  assert.equal(links.apple, 'https://music.apple.com/gb/song/1673536443');
+  assert.equal(links.youtubeMusic, 'https://music.youtube.com/watch?v=4D7u5KF7SP8');
   assert.equal(links.deezer, undefined);
   assert.deepEqual(extractLinks(recording, 'https://open.spotify.com/track/11dFghVXANMlKmJXsNCbNl'), {});
 });
