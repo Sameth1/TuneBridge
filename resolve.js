@@ -258,9 +258,11 @@ const ownAccount = (song, uploader) => compactName(primary(song.artist)).length 
 async function findSoundcloud(song) {
   const pool = matcher(song);
   for (const phrase of queries(song)) {
-    const tracks = (await searchSoundcloud(phrase)).filter(track => track.distributed || ownAccount(song, track.uploader));
-    const found = pool.exact(tracks);
+    const results = await searchSoundcloud(phrase);
+    const found = pool.exact(results.filter(track => track.distributed || ownAccount(song, track.uploader)));
     if (found) return found;
+    // No official upload: one SoundCloud recognised as this artist's recording may still be offered as the closest.
+    pool.see(results.filter(track => track.recognised && !track.distributed && artistsOverlap(song.artist, track.artist)));
   }
   return pool.closest();
 }

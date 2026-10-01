@@ -19,6 +19,8 @@ export function soundcloudSong(track) {
     // Distributor and label releases carry an ISRC or UPC and earn through ads or subscriptions; re-uploads only get
     // the artist name SoundCloud's content matching adds. Anything else is trusted only from the artist's own account.
     distributed: Boolean(publisher.isrc || publisher.upc_or_ean || ['AD_SUPPORTED', 'SUB_HIGH_TIER'].includes(track.monetization_model)),
+    // SoundCloud's content matching recognised the recording in someone's upload: never exact, at most the closest.
+    recognised: Boolean(publisher.artist && publisher.album_title),
     durationReliable: true
   };
 }
