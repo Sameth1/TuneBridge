@@ -29,7 +29,7 @@ test('reads the song name, artist and length YouTube Music gives a video', () =>
     longBylineText: { runs: [artistRun, { text: ' • 195M views' }] },
     navigationEndpoint: { watchEndpoint: { watchEndpointMusicSupportedConfigs: { watchEndpointMusicConfig: { musicVideoType: 'MUSIC_VIDEO_TYPE_OMV' } } } }
   } }] };
-  assert.deepEqual(songFromMusicNext(response, 'KLJA-srM_yM'), { title: 'Nour El Ain', artist: 'Amr Diab', album: '', duration: 407000, artwork: null, durationReliable: false });
+  assert.deepEqual(songFromMusicNext(response, 'KLJA-srM_yM'), { title: 'Nour El Ain', artist: 'Amr Diab', album: '', duration: 407000, artwork: null, durationReliable: false, unofficial: false });
 });
 
 test('a platform whose name differs gets a labelled closest match instead of a search link', async () => {

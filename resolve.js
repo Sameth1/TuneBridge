@@ -1,4 +1,4 @@
-import { UserError, PLATFORMS, parseMusicUrl, isShortMusicLink, confidentMatch, selectUniqueTitleArtist, searchLinks, normalize, sameTrackTitle, sameAlbumTitle, artistsOverlap, compactName, cleanTrackUrl, youtubeUrl, titleVariants, matchScore } from './lib.js';
+import { UserError, PLATFORMS, parseMusicUrl, splitArtistTitle, isShortMusicLink, confidentMatch, selectUniqueTitleArtist, searchLinks, normalize, sameTrackTitle, sameAlbumTitle, artistsOverlap, compactName, cleanTrackUrl, youtubeUrl, titleVariants, matchScore } from './lib.js';
 import { fetchJson, followRedirects } from './http.js';
 import { lookupSpotifyRecording, lookupIsrcRecording } from './musicbrainz.js';
 import { artworkSignature, artworkSimilarity, selectArtworkCandidate } from './artwork.js';
@@ -10,6 +10,8 @@ import { appleMusicConfigured, appleMusicSongById, appleMusicByIsrc, searchApple
 import { itunesSearch, itunesLookup, appleSong, applePageSong } from './apple.js';
 import { listenbrainzIds } from './listenbrainz.js';
 import { resolveAlbum } from './albums.js';
+import { deezerSong } from './deezer.js';
+import { identifyUpload, uploadSearches } from './identify.js';
 
 async function sourceMetadata(input) {
   switch (input.platform) {
@@ -40,10 +42,6 @@ async function sourceMetadata(input) {
     case 'youtubeMusic': return youtubeMetadata(input.id);
     case 'soundcloud': return soundcloudMetadata(input.url);
   }
-}
-
-function deezerSong(track) {
-  return { title: track.title, artist: track.artist?.name, album: track.album?.title, artwork: track.album?.cover_xl, duration: track.duration * 1000, isrc: track.isrc || null, url: track.link?.replace(/^http:/, 'https:') };
 }
 
 const primary = artist => String(artist || '').split(',')[0].trim();
@@ -240,13 +238,47 @@ async function findSoundcloud(song) {
 
 const acceptsTrackUrl = url => { try { parseMusicUrl(url); return true; } catch { return false; } };
 
+// Someone else's upload: find the release it contains from the words of its title, so the other platforms are
+// searched for that song by its real artist and name. The same recording counts as exact; a remix, live take
+// or excerpt of it makes every match the closest result. Returns that closest score, or 0.
+async function identify(song, country, record) {
+  const known = await identifyUpload({ title: song.rawTitle, channel: song.channel, duration: song.duration }, country).catch(() => null);
+  if (!known) {
+    // Unknown song: search with the title's own words, never with the uploader's channel name.
+    const words = uploadSearches(song.rawTitle);
+    const split = splitArtistTitle(String(song.rawTitle).replace(/\s*[([{【].*?[)\]}】]/g, '').replace(/#\S+/g, '').trim());
+    Object.assign(song, split ? { artist: split.artist, title: split.title } : { artist: '', title: words[1] || words[0] || song.title }, { titleVariants: [] });
+    return 0;
+  }
+  const video = { displayArtwork: song.artwork, displayDuration: song.duration };
+  Object.assign(song, known.song, { durationReliable: true, titleVariants: [], unofficial: false });
+  const platform = /deezer\.com/.test(known.song.url) ? 'deezer' : 'apple';
+  if (!known.altered) { record(platform, known.song); return 0; }
+  // Matched as the original song, shown as the upload it is ("Başa Bela (Vedat Unal Remix)", its own picture and length).
+  Object.assign(song, video, { displayTitle: known.label ? `${known.song.title} (${known.label})` : known.song.title });
+  record(platform, { ...known.song, close: true, score: 0.9 });
+  return 0.9;
+}
+
 export async function resolveMusicUrl(rawUrl, country = 'us') {
   const source = isShortMusicLink(rawUrl) ? await followRedirects(String(rawUrl).trim(), acceptsTrackUrl) : rawUrl;
   const input = parseMusicUrl(source);
   if (input.kind === 'album') return resolveAlbum(input, country);
   const song = { durationReliable: true, ...await sourceMetadata(input) };
   const exact = { [input.platform]: input.url };
-  const add = links => { for (const [platform, url] of Object.entries(links || {})) exact[platform] ||= url; };
+  // Closest (not exact) results per platform: { url, title, artist, score }.
+  const close = {};
+  // Set when the input is another version of a catalog song (a remix or live upload): every match is then only the closest.
+  let closeOnly = 0;
+  const record = (platform, match) => {
+    if (!match?.url || exact[platform]) return;
+    if (closeOnly) match = { ...match, close: true, score: Math.min(match.score || 1, closeOnly) };
+    if (match.close) { if (!close[platform] || close[platform].score < match.score) close[platform] = { url: match.url, title: match.title, artist: match.artist, score: match.score }; }
+    else { exact[platform] = match.url; delete close[platform]; }
+  };
+  const add = links => { for (const [platform, url] of Object.entries(links || {})) record(platform, { url, title: song.title, artist: song.artist }); };
+
+  if (song.unofficial) await identify(song, country, record).then(level => { closeOnly = level; });
 
   const [mapping, odesli] = await Promise.all([
     input.platform === 'spotify' ? lookupSpotifyRecording(input, song.title, country).catch(() => null) : null,
@@ -272,13 +304,6 @@ export async function resolveMusicUrl(rawUrl, country = 'us') {
 
   // Long or annotated names ("Song | Official Video | …", "Song - 2011 Remaster") are also searched in their plain forms.
   song.titleVariants = [...new Set([...(song.titleVariants || []), ...titleVariants(song.title, song.artist)])];
-  // Closest (not exact) results per platform: { url, title, artist, score }.
-  const close = {};
-  const record = (platform, match) => {
-    if (!match?.url || exact[platform]) return;
-    if (match.close) { if (!close[platform] || close[platform].score < match.score) close[platform] = { url: match.url, title: match.title, artist: match.artist, score: match.score }; }
-    else { exact[platform] = match.url; delete close[platform]; }
-  };
 
   const knownIsrc = song.isrc;
   const guessedDuration = !song.durationReliable;
@@ -349,7 +374,7 @@ export async function resolveMusicUrl(rawUrl, country = 'us') {
   const links = searchLinks(song.title, song.artist);
   return {
     kind: 'track',
-    song: { title: song.title, artist: song.artist, album: song.album, artwork: song.artwork, duration: song.duration },
+    song: { title: song.displayTitle || song.title, artist: song.artist, album: song.album, artwork: song.displayArtwork || song.artwork, duration: song.displayDuration || song.duration },
     sourcePlatform: input.platform,
     platforms: PLATFORMS.map(platform => {
       if (exact[platform.id]) return { ...platform, url: exact[platform.id], exact: true, match: 'exact' };
