@@ -1,6 +1,7 @@
 import { fetchJson, fetchText, findDeep } from './http.js';
 import { listenbrainzIds } from './listenbrainz.js';
 import { spotifyArtistIds, spotifyAlbumIds } from './musicbrainz.js';
+import { normalize } from './lib.js';
 
 let cached = { token: null, until: 0 };
 
@@ -127,9 +128,15 @@ const primaryOf = artist => String(artist || '').split(/,|&| feat\.? | ft\.? | x
 // Without API credentials, past ListenBrainz: the artist's top tracks, then the album's track list,
 // through the Spotify ids MusicBrainz links to the artist and the release.
 export async function spotifyCatalogTracks(song, { album = true } = {}) {
-  const artistIds = await spotifyArtistIds(primaryOf(song.artist)).catch(() => []);
-  const top = (await Promise.all(artistIds.map(id => fetchText(`https://open.spotify.com/embed/artist/${id}`, { retry: true })
-    .then(parseArtistEmbed).catch(() => [])))).flat();
+  // Each credited artist in turn ("Semicenk & Doğu Swag"), until one lists a song of this name.
+  const names = [...new Set(String(song.artist || '').split(/,|&| feat\.? | ft\.? | x /i).map(name => name.trim()).filter(Boolean))].slice(0, 2);
+  const top = [];
+  for (const name of names) {
+    const artistIds = await spotifyArtistIds(name).catch(() => []);
+    top.push(...(await Promise.all(artistIds.map(id => fetchText(`https://open.spotify.com/embed/artist/${id}`, { retry: true })
+      .then(parseArtistEmbed).catch(() => [])))).flat());
+    if (top.some(track => normalize(track.title) === normalize(song.title))) break;
+  }
   if (!album || !song.album) return { top, albumTracks: async () => [] };
   return {
     top,

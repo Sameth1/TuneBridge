@@ -36,3 +36,18 @@ test('only releases with an ISRC, UPC or paid streaming count as distributed on 
   assert.equal(soundcloudSong({ ...base, monetization_model: 'BLACKBOX', publisher_metadata: { artist: 'Tarkan', album_title: 'Olurum Sana' } }).distributed, false);
   assert.equal(soundcloudSong({ ...base, monetization_model: 'AD_SUPPORTED', publisher_metadata: { artist: 'Ezhel', isrc: 'QM7282641742' } }).distributed, true);
 });
+
+test('a bracketed version stays part of the name', async () => {
+  const { titleVariants } = await import('./lib.js');
+  assert.deepEqual(titleVariants('Belki (Akustik)', 'Dedublüman'), ['Belki (Akustik)']);
+  assert.deepEqual(titleVariants('Gülpembe HD Klip', 'Barış Manço'), ['Gülpembe']);
+});
+
+test('a stage performance is identified as a live take, and another live recording is not the same one', async () => {
+  const { explains, uploadSearches } = await import('./identify.js');
+  const upload = { title: "BTS (방탄소년단) 'Dynamite' @ America's Got Talent 2020", channel: 'BANGTANTV', duration: 202000, official: true };
+  assert.equal(uploadSearches(upload.title, 10, 'BTS')[0], 'Dynamite BTS');
+  const original = explains(upload, { title: 'Dynamite', artist: 'BTS', duration: 199000 });
+  assert.deepEqual([original.altered, original.versions], [true, ['live']]);
+  assert.equal(explains(upload, { title: 'Dynamite - Live', artist: 'BTS', duration: 196000 }).altered, true);
+});

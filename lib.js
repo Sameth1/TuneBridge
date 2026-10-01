@@ -283,10 +283,12 @@ export function isLabelOnly(text) {
 
 function stripLabels(text) {
   let cleaned = String(text || '').replace(/\s*[([{【]([^)\]}】]*)[)\]}】]/g, (match, inner) => (isLabelOnly(inner) ? '' : match));
+  // A bracketed word is judged by its text: "(Akustik)" is a version, not an empty label.
+  const unbracketed = value => String(value).replace(/[()[\]{}【】]/g, ' ');
   const parts = cleaned.split(/\s+[-–—]\s+/);
-  while (parts.length > 1 && isLabelOnly(parts.at(-1))) parts.pop();
+  while (parts.length > 1 && isLabelOnly(unbracketed(parts.at(-1)))) parts.pop();
   const words = parts.join(' - ').split(/\s+/);
-  while (words.length > 1 && isLabelOnly(words.at(-1))) words.pop();
+  while (words.length > 1 && isLabelOnly(unbracketed(words.at(-1)))) words.pop();
   return words.join(' ').trim();
 }
 
@@ -311,10 +313,11 @@ export function titleVariants(title, artist = '') {
     else if (sameArtistName(artist, split.title)) push(split.artist);
     else { push(split.title); push(cleaned); }
   }
-  // Plain forms: without bracketed notes or a featured artist.
+  // Plain forms: without bracketed notes or a featured artist, but never without a version ("Belki (Akustik)").
   for (const variant of [...variants]) {
-    push(variant.replace(/\s*[([{【].*?[)\]}】]/g, ''));
-    push(variant.replace(/\s+(feat\.?|ft\.?|featuring)\s.*$/i, ''));
+    for (const plain of [variant.replace(/\s*[([{【].*?[)\]}】]/g, ''), variant.replace(/\s+(feat\.?|ft\.?|featuring)\s.*$/i, '')]) {
+      if (versionTags(plain) === versionTags(variant)) push(plain);
+    }
   }
   return variants.length ? variants : [String(title || '')];
 }

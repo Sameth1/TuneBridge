@@ -133,8 +133,10 @@ export async function youtubeMetadata(id) {
     const titled = !music.unofficial && embed?.rawTitle ? splitArtistTitle(embed.rawTitle.split(/\s+\|{1,2}\s+/)[0]) : null;
     const otherArtist = titled && !artistsOverlap(music.artist, titled.artist) && !artistsOverlap(music.artist, titled.title) &&
       !compactName(titled.artist).includes(compactName(music.artist));
+    // Any video keeps its own title, which identifies the song if its name finds nothing.
     const upload = music.unofficial ? { rawTitle: music.title, channel: music.artist }
-      : otherArtist ? { unofficial: true, rawTitle: embed.rawTitle, channel: music.artist } : {};
+      : otherArtist ? { unofficial: true, rawTitle: embed.rawTitle, channel: music.artist }
+      : music.durationReliable ? {} : { rawTitle: embed?.rawTitle || music.title, channel: music.artist };
     return { ...music, ...upload, title: variants[0] || music.title, artwork: embed?.artwork || music.artwork, titleVariants: variants };
   }
   try {

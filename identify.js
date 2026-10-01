@@ -24,7 +24,7 @@ const VERSIONS = {
   cover: 'Cover', sped: 'Sped Up', speed: 'Sped Up', slowed: 'Slowed', reverb: 'Slowed + Reverb', boosted: 'Bass Boosted',
   '8d': '8D', nightcore: 'Nightcore', acoustic: 'Acoustic', akustik: 'Acoustic', instrumental: 'Instrumental',
   enstrumantal: 'Instrumental', karaoke: 'Karaoke', saatlik: 'Loop', hour: 'Loop', hours: 'Loop', loop: 'Loop',
-  yayinlanmamis: 'Unreleased', unreleased: 'Unreleased', demo: 'Demo'
+  yayinlanmamis: 'Unreleased', unreleased: 'Unreleased', demo: 'Demo', stage: 'Live', unplugged: 'Live'
 };
 
 const BRACKETS = /[([{【]([^)\]}】]*)[)\]}】]?/g;
@@ -43,10 +43,12 @@ const tokens = text => text.split(/[^\p{L}\p{N}'’&.]+/u).map(token => token.re
 
 // Search phrases, most complete first: every word, then without version words, then dropping words from
 // the end (trailing remixer or uploader names) and from the start (a leading second artist).
-export function uploadSearches(title, max = 10) {
+export function uploadSearches(title, max = 10, channel = '') {
   const all = tokens(cleanUpload(title)).filter(token => !NOISE.has(fold(token)) && !isYear(fold(token)));
   const plain = all.filter(token => !VERSIONS[fold(token)]);
-  const phrases = [all, plain];
+  // A quoted name is the song's ("BTS (방탄소년단) 'Dynamite' @ …"), searched first with the channel's name.
+  const quoted = String(title || '').match(/(?:^|\s)['‘"“]([^'’"”]{2,60})['’"”](?=\s|$)/u)?.[1];
+  const phrases = [...(quoted ? [[quoted, ...tokens(channel)]] : []), all, plain];
   for (let end = plain.length - 1; end >= 2; end--) phrases.push(plain.slice(0, end));
   for (let start = 1; plain.length - start >= 2 && start <= 2; start++) phrases.push(plain.slice(start));
   return [...new Set(phrases.map(list => list.join(' ')).filter(Boolean))].slice(0, max);
@@ -72,17 +74,28 @@ export function explains(upload, candidate) {
   // Without the artist in the title, only the full name at the same length identifies the song, and only as closest.
   if (!artistNamed && !(meaningful.every(word => explained.has(word)) && gap !== null && gap <= 3000)) return null;
   const versions = [...uploadWords].filter(word => VERSIONS[word] && !explained.has(word));
+  // "… @ America's Got Talent", "@ M COUNTDOWN": a performance on a show or stage.
+  const onStage = /\s@\s/.test(upload.title);
+  if (onStage && !explained.has('live') && !versions.includes('live')) versions.push('live');
+  // A catalog version of the same kind (another live take, another remix) is the same recording only at the same length.
+  const sameKind = [...uploadWords].some(word => VERSIONS[word] && explained.has(word)) || (onStage && explained.has('live'));
+  const own = words(candidate.title).filter(word => VERSIONS[word]).length;
   // Lyric and fan uploads often trim a few seconds; more than 15 s apart is an excerpt or another take.
-  const altered = !artistNamed || versions.length > 0 || (gap !== null && gap > 15000);
-  return { coverage, gap, altered, versions };
+  // An artist's own music video may add an intro or outro, up to 90 s.
+  // Live takes of one song run alike, so another live recording must also name the same show or concert.
+  const otherShow = sameKind && (onStage || uploadWords.has('live') || uploadWords.has('canli')) && coverage < 0.9;
+  const altered = !artistNamed || versions.length > 0 || otherShow || (sameKind && (gap === null || gap > 8000)) ||
+    (gap !== null && gap > (upload.official ? 90000 : 15000));
+  return { coverage, gap, altered, versions, own };
 }
 
 function best(upload, candidates) {
   return candidates
     .map((candidate, rank) => ({ candidate, rank, fit: explains(upload, candidate) }))
     .filter(entry => entry.fit)
-    .sort((a, b) => Number(a.fit.altered) - Number(b.fit.altered) || b.fit.coverage - a.fit.coverage ||
-      (a.fit.gap ?? 1e9) - (b.fit.gap ?? 1e9) || a.rank - b.rank)[0] || null;
+    // Another version of the song is shown against the original release, not against a different version.
+    .sort((a, b) => Number(a.fit.altered) - Number(b.fit.altered) || (a.fit.altered ? a.fit.own - b.fit.own : 0) ||
+      b.fit.coverage - a.fit.coverage || (a.fit.gap ?? 1e9) - (b.fit.gap ?? 1e9) || a.rank - b.rank)[0] || null;
 }
 
 // "(Vedat Unal Remix)" from the upload title, or a label for its version words.
@@ -96,7 +109,7 @@ function versionLabel(title, versions) {
 // The catalog song an upload contains: { song, altered, label } where `altered` means a remix, live take,
 // excerpt or other version, which other platforms can only offer as the closest result.
 export async function identifyUpload(upload, country = 'us') {
-  const phrases = uploadSearches(upload.title);
+  const phrases = uploadSearches(upload.title, 10, upload.channel);
   let found = null;
   for (const phrase of phrases) {
     found = best(upload, await searchDeezer(phrase));
