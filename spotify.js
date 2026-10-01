@@ -1,5 +1,7 @@
 import { fetchJson, fetchText, findDeep } from './http.js';
 import { listenbrainzIds } from './listenbrainz.js';
+import { spotifyArtistIds, spotifyAlbumIds } from './musicbrainz.js';
+import { normalize } from './lib.js';
 
 let cached = { token: null, until: 0 };
 
@@ -104,7 +106,45 @@ export function parseAlbumEmbed(html) {
     year: entity.releaseDate?.isoString?.slice(0, 4) || null,
     artwork: largestImage(entity),
     upc: null,
-    tracks: entity.trackList.map(track => ({ title: track.title, artist: track.subtitle, duration: track.duration || null }))
+    tracks: entity.trackList.map(embedTrack)
+  };
+}
+
+// A track row of an album or artist embed: name, artists, length and id.
+function embedTrack(track) {
+  const id = String(track.uri || '').match(/^spotify:track:([A-Za-z0-9]{22})$/)?.[1];
+  return { title: track.title, artist: track.subtitle, duration: track.duration || null, isrc: null, url: id ? `https://open.spotify.com/track/${id}` : null };
+}
+
+// An artist's embed page lists their ten most played tracks.
+export function parseArtistEmbed(html) {
+  const data = nextData(html);
+  const entity = data && findDeep(data, value => String(value.uri || '').startsWith('spotify:artist:') && Array.isArray(value.trackList));
+  return entity ? entity.trackList.map(embedTrack).filter(track => track.url) : [];
+}
+
+const primaryOf = artist => String(artist || '').split(/,|&| feat\.? | ft\.? | x /i)[0].trim();
+
+// Without API credentials, past ListenBrainz: the artist's top tracks, then the album's track list,
+// through the Spotify ids MusicBrainz links to the artist and the release.
+export async function spotifyCatalogTracks(song, { album = true } = {}) {
+  // Each credited artist in turn ("Semicenk & Doğu Swag"), until one lists a song of this name.
+  const names = [...new Set(String(song.artist || '').split(/,|&| feat\.? | ft\.? | x /i).map(name => name.trim()).filter(Boolean))].slice(0, 2);
+  const top = [];
+  for (const name of names) {
+    const artistIds = await spotifyArtistIds(name).catch(() => []);
+    top.push(...(await Promise.all(artistIds.map(id => fetchText(`https://open.spotify.com/embed/artist/${id}`, { retry: true })
+      .then(parseArtistEmbed).catch(() => [])))).flat());
+    if (top.some(track => normalize(track.title) === normalize(song.title))) break;
+  }
+  if (!album || !song.album) return { top, albumTracks: async () => [] };
+  return {
+    top,
+    albumTracks: async () => {
+      const albumIds = await spotifyAlbumIds(song.album, primaryOf(song.artist)).catch(() => []);
+      const albums = await Promise.all(albumIds.map(id => spotifyAlbumById(id).catch(() => null)));
+      return albums.flatMap(found => (found?.tracks || []).filter(track => track.url).map(track => ({ ...track, album: found.title, artwork: found.artwork })));
+    }
   };
 }
 

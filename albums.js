@@ -4,7 +4,7 @@ import { itunesLookup, itunesSearch, appleAlbum, parseApplePage } from './apple.
 import { spotifyAlbumById, spotifyAlbumIdOfTrack, searchSpotifyKeyless, searchSpotifyAlbums } from './spotify.js';
 import { youtubeAlbumMetadata, youtubeMusicAlbumOfVideo, searchYoutubeVideos, searchYoutubeMusic } from './youtube.js';
 import { soundcloudAlbumMetadata, searchSoundcloudAlbums } from './soundcloud.js';
-import { lookupReleaseByBarcode } from './musicbrainz.js';
+import { lookupReleaseByBarcode, spotifyAlbumIds } from './musicbrainz.js';
 
 const primaryArtist = artist => String(artist || '').split(/,|&| feat\.? /i)[0].trim();
 const albumQuery = album => `${normalize(String(album.title).replace(/\s[-–—]\s(single|ep)$/i, ''))} ${primaryArtist(album.artist)}`;
@@ -96,6 +96,11 @@ const trackSong = (album, track) => ({ title: track.title, artist: track.artist 
 async function findSpotifyAlbum(album) {
   const viaApi = pickAlbum(album, await searchSpotifyAlbums(album).catch(() => []));
   if (viaApi) return viaApi;
+  // The Spotify album MusicBrainz links to a release of this name.
+  for (const id of await spotifyAlbumIds(String(album.title).replace(/\s[-–—]\s(single|ep)$/i, ''), primaryArtist(album.artist)).catch(() => [])) {
+    const found = await spotifyAlbumById(id).catch(() => null);
+    if (found && albumMatch(album, found)) return found;
+  }
   const seen = new Set();
   for (const track of album.tracks.slice(0, 2)) {
     const song = trackSong(album, track);
