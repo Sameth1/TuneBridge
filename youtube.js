@@ -50,10 +50,13 @@ export function youtubeSongFromPlayer(player) {
   // A music video: "Artist - Title (Official Video)" or a channel named after the artist.
   // Its length often includes intros, so matching must not rely on duration.
   const split = splitArtistTitle(details.title);
+  const channel = cleanChannelName(details.author);
   return {
     title: cleanVideoTitle(split?.title || details.title),
-    artist: split?.artist || cleanChannelName(details.author),
-    album: '', duration, artwork, durationReliable: false
+    artist: split?.artist || channel,
+    album: '', duration, artwork, durationReliable: false,
+    // Unless the channel is the artist the title names, the song is identified from the title.
+    ...(!split || !artistsOverlap(channel, split.artist) ? { unofficial: true, rawTitle: details.title, channel } : {})
   };
 }
 
@@ -66,7 +69,7 @@ async function youtubePlayer(id) {
   });
 }
 
-async function musicNext(videoId) {
+export async function musicNext(videoId) {
   return fetchJson('https://music.youtube.com/youtubei/v1/next?prettyPrint=false', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Origin: 'https://music.youtube.com', Referer: 'https://music.youtube.com/', ...PAGE_HEADERS },
@@ -94,7 +97,9 @@ export function songFromMusicNext(response, videoId) {
     album,
     duration: parseDuration((item.lengthText?.runs || []).map(run => run.text).join('')),
     artwork: (item.thumbnail?.thumbnails || []).at(-1)?.url || null,
-    durationReliable: type === 'MUSIC_VIDEO_TYPE_ATV'
+    durationReliable: type === 'MUSIC_VIDEO_TYPE_ATV',
+    // Someone's own upload rather than a release or the artist's video: its channel is not the artist.
+    unofficial: type === 'MUSIC_VIDEO_TYPE_UGC'
   };
 }
 
@@ -104,7 +109,8 @@ async function oembedSong(id) {
   const artist = cleanChannelName(data.author_name);
   const variants = topic ? [data.title] : titleVariants(data.title, artist);
   const split = topic ? null : splitArtistTitle(data.title.split(/\s+\|{1,2}\s+/)[0]);
-  return { title: variants[0], titleVariants: variants, rawTitle: data.title, artist: split && !artistsOverlap(artist, split.title) ? split.artist : artist,
+  return { title: variants[0], titleVariants: variants, rawTitle: data.title, channel: artist, unofficial: !topic,
+    artist: split && !artistsOverlap(artist, split.title) ? split.artist : artist,
     album: '', duration: null, artwork: data.thumbnail_url, durationReliable: false };
 }
 
@@ -122,7 +128,14 @@ export async function youtubeMetadata(id) {
     // the video's title can hold other spellings or scripts of the name, which are searched as well.
     const variants = [...new Set([...titleVariants(music.title, music.artist), ...(embed?.titleVariants || [])])]
       .filter(variant => !artistsOverlap(music.artist, splitArtistTitle(variant)?.artist || ''));
-    return { ...music, title: variants[0] || music.title, artwork: embed?.artwork || music.artwork, titleVariants: variants };
+    // A video titled after another artist ("Ezhel - Başa Bela (Vedat Unal Remix)" on Vedat Unal's channel)
+    // is that artist's song in another version, identified from the full title like an unofficial upload.
+    const titled = !music.unofficial && embed?.rawTitle ? splitArtistTitle(embed.rawTitle.split(/\s+\|{1,2}\s+/)[0]) : null;
+    const otherArtist = titled && !artistsOverlap(music.artist, titled.artist) && !artistsOverlap(music.artist, titled.title) &&
+      !compactName(titled.artist).includes(compactName(music.artist));
+    const upload = music.unofficial ? { rawTitle: music.title, channel: music.artist }
+      : otherArtist ? { unofficial: true, rawTitle: embed.rawTitle, channel: music.artist } : {};
+    return { ...music, ...upload, title: variants[0] || music.title, artwork: embed?.artwork || music.artwork, titleVariants: variants };
   }
   try {
     const html = await fetchText(`https://www.youtube.com/watch?v=${id}&hl=en`, { headers: PAGE_HEADERS });
