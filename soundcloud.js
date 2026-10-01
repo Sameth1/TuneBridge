@@ -16,8 +16,9 @@ export function soundcloudSong(track) {
     artwork,
     url: track.permalink_url || null,
     uploader: track.user?.username || '',
-    // Label-distributed tracks carry publisher metadata; anything else is only trusted from the artist's own account.
-    distributed: Boolean(publisher.artist || publisher.isrc),
+    // Distributor and label releases carry an ISRC or UPC and earn through ads or subscriptions; re-uploads only get
+    // the artist name SoundCloud's content matching adds. Anything else is trusted only from the artist's own account.
+    distributed: Boolean(publisher.isrc || publisher.upc_or_ean || ['AD_SUPPORTED', 'SUB_HIGH_TIER'].includes(track.monetization_model)),
     durationReliable: true
   };
 }
@@ -46,7 +47,7 @@ export function findClientId(script) {
 }
 
 // The public web player embeds its api-v2 client_id in one of its JavaScript bundles.
-async function soundcloudClientId() {
+export async function soundcloudClientId() {
   if (process.env.SOUNDCLOUD_CLIENT_ID) return process.env.SOUNDCLOUD_CLIENT_ID;
   if (clientId.until > Date.now()) return clientId.value;
   const html = await fetchText('https://soundcloud.com/').catch(() => '');

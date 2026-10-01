@@ -79,3 +79,31 @@ export async function applePageSong(id, country) {
   const url = `https://music.apple.com/${country}/song/${id}`;
   return parseApplePage(await fetchText(url, { headers: { 'Accept-Language': 'en-US,en;q=0.9' } }), url);
 }
+
+// Apple Music's own search page carries its results as JSON. Unlike the iTunes Search API it is not limited
+// to about 20 requests a minute, but it gives no song length, which each song's page then supplies.
+export function parseAppleSearch(html) {
+  const json = html.match(/<script type="application\/json" id="serialized-server-data">([\s\S]*?)<\/script>/)?.[1];
+  let data;
+  try { data = json ? JSON.parse(json) : null; } catch { return []; }
+  const songs = new Map();
+  const walk = value => {
+    if (Array.isArray(value)) return value.forEach(walk);
+    if (!value || typeof value !== 'object') return;
+    const descriptor = value.contentDescriptor;
+    if (descriptor?.kind === 'song' && value.title && descriptor.url) {
+      const id = descriptor.identifiers?.storeAdamID;
+      const artist = (value.subtitleLinks || []).map(link => link.title).filter(Boolean).join(', ') ||
+        String(value.subtitle || '').split('·').slice(1).join('·').trim();
+      if (id && artist && !songs.has(id)) songs.set(id, { id, title: value.title, artist, url: cleanTrackUrl('apple', descriptor.url) });
+    }
+    Object.values(value).forEach(walk);
+  };
+  walk(data);
+  return [...songs.values()].filter(song => song.url);
+}
+
+export async function appleWebSearch(term, country) {
+  const html = await fetchText(`https://music.apple.com/${country}/search?term=${encodeURIComponent(term)}`, { headers: { 'Accept-Language': 'en-US,en;q=0.9' } });
+  return parseAppleSearch(html);
+}

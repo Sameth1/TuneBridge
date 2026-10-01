@@ -1,4 +1,4 @@
-import { normalize, parseMusicUrl, confidentMatch, youtubeAlbumUrl } from './lib.js';
+import { normalize, parseMusicUrl, confidentMatch, youtubeAlbumUrl, compactName } from './lib.js';
 
 let queue = Promise.resolve();
 let lastRequest = 0;
@@ -127,4 +127,53 @@ export async function lookupReleaseByBarcode(upc, country = 'us') {
     for (const [platform, url] of Object.entries(extractAlbumLinks(release, country))) links[platform] ||= url;
   }
   return links;
+}
+
+// Spotify ids that MusicBrainz links to an artist or a release. Without Spotify API credentials they lead to the
+// artist's top tracks and the album's track list, both readable from Spotify's public embed pages.
+const spotifyIds = new Map();
+const quoted = value => `"${String(value || '').replace(/["\\]/g, ' ').trim()}"`;
+
+async function cachedIds(key, find) {
+  const hit = spotifyIds.get(key);
+  if (hit && hit.until > Date.now()) return hit.ids;
+  const ids = [...new Set(await find())].slice(0, 3);
+  if (spotifyIds.size >= 500) spotifyIds.delete(spotifyIds.keys().next().value);
+  spotifyIds.set(key, { ids, until: Date.now() + 12 * 3600_000 });
+  return ids;
+}
+
+async function spotifyLinksOf(entity, mbids, kind) {
+  const pattern = new RegExp(`open\\.spotify\\.com/${kind}/([A-Za-z0-9]{22})`);
+  const ids = [];
+  for (const mbid of mbids) {
+    const full = await getMusicBrainz(`https://musicbrainz.org/ws/2/${entity}/${mbid}?inc=url-rels&fmt=json`);
+    for (const relation of full?.relations || []) {
+      const id = relation.url?.resource?.match(pattern)?.[1];
+      if (id) ids.push(id);
+    }
+  }
+  return ids;
+}
+
+export async function spotifyArtistIds(name) {
+  const key = compactName(name);
+  if (!key) return [];
+  return cachedIds(`artist:${key}`, async () => {
+    const search = await getMusicBrainz(`https://musicbrainz.org/ws/2/artist?query=${encodeURIComponent(`artist:${quoted(name)} OR alias:${quoted(name)}`)}&limit=5&fmt=json`);
+    const named = (search?.artists || [])
+      .filter(artist => [artist.name, artist['sort-name'], ...(artist.aliases || []).map(alias => alias.name)].some(value => compactName(value) === key))
+      .slice(0, 2).map(artist => artist.id);
+    return spotifyLinksOf('artist', named, 'artist');
+  });
+}
+
+export async function spotifyAlbumIds(album, artist) {
+  const title = normalize(album);
+  if (!title || !artist) return [];
+  return cachedIds(`album:${title}:${compactName(artist)}`, async () => {
+    const search = await getMusicBrainz(`https://musicbrainz.org/ws/2/release?query=${encodeURIComponent(`release:${quoted(album)} AND artist:${quoted(artist)}`)}&limit=5&fmt=json`);
+    const named = (search?.releases || []).filter(release => normalize(release.title) === title).slice(0, 2).map(release => release.id);
+    return spotifyLinksOf('release', named, 'album');
+  });
 }

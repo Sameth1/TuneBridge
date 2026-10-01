@@ -89,7 +89,7 @@ export function normalize(value) {
     .replace(/[^\p{L}\p{N}]+/gu, ' ').trim().replace(/\s+/g, ' ');
 }
 
-function versionTags(value) {
+export function versionTags(value) {
   const title = String(value || '').toLocaleLowerCase('und');
   const groups = {
     live: ['live', 'canlı', 'en vivo', 'ao vivo'],
@@ -142,6 +142,23 @@ export function confidentMatch(source, candidate) {
   if (source.isrc && candidate.isrc && !sameIsrc) return false;
   const durationMatches = durationDelta !== null && durationDelta <= 6000;
   return artistMatches && (sameIsrc || durationMatches);
+}
+
+// The same recording under a transliterated name ("Tamally Maak" / "Tamly Maak", "Fairuz" / "Fairouz"):
+// one or two letters apart, same version, same artist, and the same length to within two seconds.
+export function spelledMatch(source, candidate) {
+  if (!source.title || !candidate.title || !source.duration || !candidate.duration) return false;
+  if (source.isrc && candidate.isrc && source.isrc !== candidate.isrc) return false;
+  if (Math.abs(source.duration - candidate.duration) > 2000 || versionTags(source.title) !== versionTags(candidate.title)) return false;
+  const a = compactName(source.title);
+  const b = compactName(candidate.title);
+  if (Math.min(a.length, b.length) < 5 || editDistance(a, b) > (Math.min(a.length, b.length) >= 8 ? 2 : 1)) return false;
+  // Transliterations differ in vowels and doubled letters; another consonant is another word ("Seni" / "Beni").
+  const skeleton = value => value.replace(/[aeiouy]/g, '').replace(/(.)\1+/g, '$1');
+  if (skeleton(a) !== skeleton(b)) return false;
+  const artistA = compactName(String(source.artist || '').split(/,|&/)[0]);
+  const artistB = compactName(String(candidate.artist || '').split(/,|&/)[0]);
+  return artistsOverlap(source.artist, candidate.artist) || (Math.min(artistA.length, artistB.length) >= 4 && editDistance(artistA, artistB) <= 2);
 }
 
 export function artistsOverlap(first, second) {
