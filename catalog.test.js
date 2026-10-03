@@ -23,6 +23,13 @@ test('reads songs from the Apple Music search page', () => {
   assert.deepEqual(parseAppleSearch(html), [{ id: '6772992188', title: 'Başa Bela', artist: 'Ezhel', url: 'https://music.apple.com/tr/album/ba%C5%9Fa-bela/6772992184?i=6772992188' }]);
 });
 
+test('reads an Apple song page whose title has a non-breaking space in "Apple Music"', async () => {
+  const { parseApplePage } = await import('./apple.js');
+  const html = '<meta property="og:title" content="La Nocturne by Tiakola &amp; Theodora on Apple Music"><meta property="music:song:duration" content="PT3M41S">';
+  const song = parseApplePage(html, 'https://music.apple.com/tr/song/6809755258');
+  assert.deepEqual([song.title, song.artist, song.duration], ['La Nocturne', 'Tiakola & Theodora', 221000]);
+});
+
 test('reads an artist’s top tracks from the Spotify embed page', () => {
   const state = { props: { pageProps: { state: { data: { entity: { uri: 'spotify:artist:6LnJKrtFnTEGdbWQ2riWCL', trackList: [
     { uri: 'spotify:track:0onzYPfM09MY31tUkb0xgj', title: 'Başa Bela', subtitle: 'Ezhel', duration: 154081 }
