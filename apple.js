@@ -69,7 +69,8 @@ const isoDuration = value => {
 // when the iTunes API is rate-limited.
 export function parseApplePage(html, url) {
   const meta = name => html.match(new RegExp(`<meta (?:property|name)="${name}" content="([^"]*)"`))?.[1]
-    ?.replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"');
+    ?.replace(/&amp;/g, '&').replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/ /g, ' ');
+  // Apple writes "Apple Music" with a non-breaking space.
   const heading = meta('og:title')?.match(/^(.*) by (.*) on Apple Music$/);
   if (!heading) return null;
   return { title: heading[1], artist: heading[2], album: '', duration: isoDuration(meta('music:song:duration')), isrc: null, url: cleanTrackUrl('apple', url) };
